@@ -2,7 +2,7 @@
   <h1>🚀 Shiny Server</h1>
   <p><strong>A Hyper-Optimized, Assembly-based HTTP Proxy & Load Balancer</strong></p>
   
-  [![Build Status](https://github.com/USERNAME/Shiny/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/Shiny/actions)
+  [![Build Status](https://github.com/Jikenlabs/Shiny/actions/workflows/ci.yml/badge.svg)](https://github.com/Jikenlabs/Shiny/actions)
   [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/Jikenlabs/Shiny/blob/main/LICENSE)
   [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-blue.svg)](#)
 </div>
