@@ -1,0 +1,41 @@
+name: Release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger build and release on tags starting with "v" (e.g. v1.0.0)
+
+jobs:
+  build_release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create a release
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm gcc make libssl-dev
+
+      - name: Build Shiny Server
+        run: |
+          make
+
+      - name: Package Release
+        run: |
+          tar -czvf Shiny-Server-Linux-x86_64.tar.gz server shiny.conf docs/
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Shiny-Server-Linux-x86_64.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
