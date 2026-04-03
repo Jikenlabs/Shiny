@@ -1,0 +1,18 @@
+# Compiled objects
+*.o
+
+# Executables
+server
+Shiny
+
+# Python testing cache
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Logs
+*.log
+*.strace
+
+# OS generated files
+.DS_Store
