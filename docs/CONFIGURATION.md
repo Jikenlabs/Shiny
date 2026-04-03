@@ -80,5 +80,14 @@ server {
 }
 ```
 
+### TLS Handshake Threads (`SHINY_TLS_THREADS`)
+
+While `worker_processes` scales the main event loop, the expensive operations of establishing TLS 1.3 handshakes are offloaded to dedicated background threads within each worker. By default, **4 TLS threads** are spawned per worker. You can override this limit (up to a maximum of 16) using the `SHINY_TLS_THREADS` environment variable when launching the server:
+
+```bash
+# Force 2 TLS handshake threads per worker
+SHINY_TLS_THREADS=2 ./Shiny
+```
+
 > [!CAUTION]
 > The internal `tls_handshake.c` logic dynamically maps to OpenSSL implementations. Do not use extremely specific cypher payloads unless your OpenSSL environment aligns natively. Use modern default curve TLS settings.
