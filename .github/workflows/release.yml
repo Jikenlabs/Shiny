@@ -30,7 +30,7 @@ jobs:
 
       - name: Package Release
         run: |
-          tar -czvf Shiny-Server-Linux-x86_64.tar.gz server shiny.conf docs/
+          tar -czvf Shiny-Server-Linux-x86_64.tar.gz Shiny shiny.conf docs/
           
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
