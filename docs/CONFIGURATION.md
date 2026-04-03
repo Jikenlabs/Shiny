@@ -59,6 +59,11 @@ server {
 - `keepalive_requests <int>;`
   The threshold for multiplexing connections back to the proxy targets before closing the `AF_INET` or `AF_UNIX` upstream handle.
 
+### 4. `worker_processes`
+- **Description:** Defines the number of worker processes spawned by the server. Each worker is isolated and runs its own dedicated TLS context (`tls_worker_init`). This dictates the level of parallelization for both standard connections and expensive TLS handshakes. It must be declared in the global scope (outside `server` blocks). Set to `0` for auto-detection based on available CPU cores.
+- **Example:** `worker_processes 8;`
+
+
 ## TLS Considerations
 
 If you intend to test HTTPS connections or bind a production cluster with TLS enabled, you must specify `ssl` on the listen block and provide certificates inside a dedicated `tls/` or `conf.d/` directory.
