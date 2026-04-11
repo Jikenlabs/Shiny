@@ -22,12 +22,12 @@ int tls_res_fd[2]; // Manager writes fd to res_fd[1], ASM reads res_fd[0]
 
 // Pending SSL states
 struct tls_state {
-    int fd;
+    int fd;         // Real network socket
+    int asm_fd;     // Internal side of socketpair (for proxying)
     SSL *ssl;
     int port;
+    int is_proxy;   // 1 if we are acting as a decryption proxy for TLS 1.3
 };
-
-static struct tls_state *handshakes[65536] = {0};
 
 // Set fd non-blocking
 static void set_nonblock(int fd) {
@@ -40,102 +40,128 @@ static void set_block(int fd) {
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
+static void cleanup_state(int epfd, struct tls_state *st) {
+    if (!st) return;
+    if (st->fd >= 0) {
+        epoll_ctl(epfd, EPOLL_CTL_DEL, st->fd, NULL);
+        close(st->fd);
+    }
+    if (st->asm_fd >= 0) {
+        epoll_ctl(epfd, EPOLL_CTL_DEL, st->asm_fd, NULL);
+        close(st->asm_fd);
+    }
+    if (st->ssl) SSL_free(st->ssl);
+    free(st);
+}
+
 static void *tls_manager_loop(void *arg) {
     int epfd = epoll_create1(0);
     struct epoll_event ev, events[256];
 
-    // Monitor the Request Pipe (EPOLLEXCLUSIVE properly balances threads!)
+    // Monitor the Request Pipe
+    // Use (void*)1 to distinguish from tls_state pointers
     ev.events = EPOLLIN | EPOLLEXCLUSIVE;
-    ev.data.fd = tls_req_fd[0];
+    ev.data.ptr = (void*)1; 
     epoll_ctl(epfd, EPOLL_CTL_ADD, tls_req_fd[0], &ev);
 
     while (1) {
         int n = epoll_wait(epfd, events, 256, -1);
         for (int i = 0; i < n; i++) {
-            int active_fd = events[i].data.fd;
-
             // 1. New Request from Assembly loop
-            if (active_fd == tls_req_fd[0]) {
+            if (events[i].data.ptr == (void*)1) {
                 struct { int fd; int port; } req;
-                // Reading 8 bytes per epoll_wait (FD + PORT)
-                if (read(tls_req_fd[0], &req, 8) == 8) {
+                while (read(tls_req_fd[0], &req, 8) == 8) {
                     set_nonblock(req.fd);
                     SSL *ssl = SSL_new(g_ctx);
+                    const char *tls_ver = getenv("SHINY_TLS_VERSION");
+                    if (tls_ver && strcmp(tls_ver, "1.3") == 0) {
+                        SSL_set_read_ahead(ssl, 0);
+                        SSL_set_mode(ssl, SSL_MODE_RELEASE_BUFFERS);
+                    }
                     SSL_set_fd(ssl, req.fd);
 
-                    struct tls_state *st = malloc(sizeof(struct tls_state));
-                    st->fd = req.fd;
-                    st->port = req.port;
-                    st->ssl = ssl;
-                    handshakes[req.fd] = st;
-
-                    // Add client_fd to epoll to perform async SSL_accept
-                    struct epoll_event cev;
-                    cev.events = EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR | EPOLLET;
-                    cev.data.fd = req.fd;
-                    epoll_ctl(epfd, EPOLL_CTL_ADD, req.fd, &cev);
-                    
-                    // KICKSTART HANDSHAKE
-                    active_fd = req.fd;
-                    goto pump_handshake;
+                    struct tls_state *st = calloc(1, sizeof(struct tls_state));
+                    st->fd = req.fd; st->asm_fd = -1; st->port = req.port; st->ssl = ssl;
+                    struct epoll_event cev = { .events = EPOLLIN | EPOLLOUT | EPOLLET, .data.ptr = st };
+                    epoll_ctl(epfd, EPOLL_CTL_ADD, st->fd, &cev);
+                    int ret = SSL_accept(st->ssl);
+                    if (ret == 1) goto handshake_done_final; 
                 }
                 continue;
             }
 
-pump_handshake:
-            // 2. Client Handshake Progress
-            struct tls_state *st = handshakes[active_fd];
-            if (!st) continue; // Should not happen
+            // 2. Identification du contexte et du canal
+            uintptr_t ptr_raw = (uintptr_t)events[i].data.ptr;
+            struct tls_state *st = (struct tls_state *)(ptr_raw & ~1UL);
+            int is_asm_event = (ptr_raw & 1);
+            if (!st) continue;
 
+            // 3. Mode Proxy (Déchiffrement applicatif pour TLS 1.3 Keep-Alive)
+            if (st->is_proxy) {
+                char buf[16384];
+                if (is_asm_event) {
+                    // Données de l'Ouvrier ASM -> Chiffrement -> Réseau
+                    int nread = read(st->asm_fd, buf, sizeof(buf));
+                    if (nread > 0) SSL_write(st->ssl, buf, nread);
+                    else if (nread == 0) cleanup_state(epfd, st);
+                } else {
+                    // Données du Réseau -> Déchiffrement -> Ouvrier ASM
+                    int nread;
+                    while ((nread = SSL_read(st->ssl, buf, sizeof(buf))) > 0) {
+                        if (write(st->asm_fd, buf, nread) < 0) { /* Handle error if needed */ ; }
+                    }
+                    if (nread <= 0) {
+                        int err = SSL_get_error(st->ssl, nread);
+                        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) cleanup_state(epfd, st);
+                    }
+                }
+                continue;
+            }
+
+            // 4. Suite du Handshake TLS
             int ret = SSL_accept(st->ssl);
             if (ret == 1) {
-                // SSL Handshake completed!
-                epoll_ctl(epfd, EPOLL_CTL_DEL, active_fd, NULL);
-                set_block(active_fd);
-                
-                // Verify if kTLS actually activated
+handshake_done_final: {
                 BIO *wbio = SSL_get_wbio(st->ssl);
                 BIO *rbio = SSL_get_rbio(st->ssl);
-                int ksend = wbio ? BIO_get_ktls_send(wbio) : 0;
-                int krecv = rbio ? BIO_get_ktls_recv(rbio) : 0;
-                
-                FILE *f = fopen("/tmp/ktls_status.txt", "w");
-                if (f) {
-                    fprintf(f, "TX=%d RX=%d\n", ksend, krecv);
-                    fclose(f);
-                }
+                int ksend = (wbio && BIO_get_ktls_send(wbio));
+                int krecv = (rbio && BIO_get_ktls_recv(rbio));
+                const char *tver = getenv("SHINY_TLS_VERSION");
+                int is_13 = (tver && strcmp(tver, "1.3") == 0);
 
-                if (ksend) {
-                    // kTLS Successful Hardware Offload!
-                    // Return raw fd AND preserved port to Assembly logic
+                if (ksend && (krecv || !is_13)) {
+                    // Fast Path kTLS direct
+                    epoll_ctl(epfd, EPOLL_CTL_DEL, st->fd, NULL);
+                    set_block(st->fd);
+                    char pre_buf[4096];
+                    int pre_len = SSL_read(st->ssl, pre_buf, sizeof(pre_buf));
+                    if (pre_len < 0) pre_len = 0;
                     SSL_set_fd(st->ssl, -1);
-                    struct { int fd; int port; } res = { active_fd, st->port };
-                    if (write(tls_res_fd[1], &res, 8) != 8) {
-                        // Ignore write error silently to avoid blocking IO
-                    }
+                    struct { int fd, port, data_len; char data[4096]; } msg = { st->fd, st->port, pre_len };
+                    if (pre_len > 0) memcpy(msg.data, pre_buf, pre_len);
+                    if (write(tls_res_fd[1], &msg, 12 + pre_len) < 0) { /* Silence warning */ ; }
+                    st->fd = -1; cleanup_state(epfd, st);
+                } else if (is_13) {
+                    // Proxy Decrypt Path (Handover transparent via socketpair)
+                    int p_fds[2];
+                    if (socketpair(AF_UNIX, SOCK_STREAM, 0, p_fds) < 0) { cleanup_state(epfd, st); continue; }
+                    set_nonblock(p_fds[0]);
+                    st->asm_fd = p_fds[0];
+                    st->is_proxy = 1;
+                    struct epoll_event ev_net = { .events = EPOLLIN | EPOLLET, .data.ptr = st };
+                    epoll_ctl(epfd, EPOLL_CTL_MOD, st->fd, &ev_net);
+                    struct epoll_event ev_asm = { .events = EPOLLIN | EPOLLET, .data.ptr = (void*)((uintptr_t)st | 1) };
+                    epoll_ctl(epfd, EPOLL_CTL_ADD, st->asm_fd, &ev_asm);
+                    struct { int fd, port, data_len; } msg = { p_fds[1], st->port, 0 };
+                    if (write(tls_res_fd[1], &msg, 12) < 0) { /* Silence warning */ ; }
                 } else {
-                    // Fallback userspace -> Reject connection!
-                    close(active_fd);
+                    cleanup_state(epfd, st);
                 }
-                SSL_free(st->ssl);
-                free(st);
-                handshakes[active_fd] = NULL;
-                continue;
+              }
+              continue;
             } 
-            
-            // Still handshaking: evaluate errors
             int err = SSL_get_error(st->ssl, ret);
-            if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                // Must wait for more events, keep in epoll silently!
-                continue;
-            } else {
-                // Hard Error (e.g. unknown protocol / client reset)
-                epoll_ctl(epfd, EPOLL_CTL_DEL, active_fd, NULL);
-                close(active_fd);
-                SSL_free(st->ssl);
-                free(st);
-                handshakes[active_fd] = NULL;
-            }
+            if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) cleanup_state(epfd, st);
         }
     }
     return NULL;
@@ -148,9 +174,21 @@ void tls_ctx_init(void) {
     SSL_CTX_set_num_tickets(g_ctx, 0);
     if (!g_ctx) return;
 
-    // Force TLS 1.2 for flawless kTLS mapping
-    SSL_CTX_set_min_proto_version(g_ctx, TLS1_2_VERSION);
-    SSL_CTX_set_max_proto_version(g_ctx, TLS1_2_VERSION);
+    // Select TLS version via environment variable (Default: TLS 1.2)
+    const char *tls_ver = getenv("SHINY_TLS_VERSION");
+    if (tls_ver && strcmp(tls_ver, "1.3") == 0) {
+        SSL_CTX_set_min_proto_version(g_ctx, TLS1_3_VERSION);
+        SSL_CTX_set_max_proto_version(g_ctx, TLS1_3_VERSION);
+        
+        // TLS 1.3 Default: AES-256-GCM (Overrideable via SHINY_TLS_CIPHER)
+        const char *cipher = getenv("SHINY_TLS_CIPHER");
+        if (!cipher) cipher = "TLS_AES_256_GCM_SHA384";
+        SSL_CTX_set_ciphersuites(g_ctx, cipher);
+    } else {
+        // Force TLS 1.2 for flawless kTLS mapping
+        SSL_CTX_set_min_proto_version(g_ctx, TLS1_2_VERSION);
+        SSL_CTX_set_max_proto_version(g_ctx, TLS1_2_VERSION);
+    }
 
     // EXTREMELY IMPORTANT: We force Native Kernel TLS (kTLS) injection!
     SSL_CTX_set_options(g_ctx, SSL_OP_ENABLE_KTLS);
@@ -172,9 +210,11 @@ int tls_worker_init(void) {
     if (pipe(tls_req_fd) < 0) return -1;
     if (pipe(tls_res_fd) < 0) return -1;
     
-    // Set nonblock on pipes to prevent deadlocks
+    // Set nonblock on ALL pipe ends to prevent deadlocks between ASM workers and TLS managers
     set_nonblock(tls_req_fd[0]);
+    set_nonblock(tls_req_fd[1]);
     set_nonblock(tls_res_fd[0]);
+    set_nonblock(tls_res_fd[1]);
 
     // Create a TLS thread pool (configurable via ENV, max 16 per worker)
     int num_threads = 4;

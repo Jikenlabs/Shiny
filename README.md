@@ -19,7 +19,7 @@
 - **✂️ Zero-Copy Networking:** Implements `IORING_OP_SEND_ZC` to bypass kernel networking buffers and pass memory directly to the NIC driver.
 - **🚥 Smart Load Balancing:** Round-Robin, IP Hash, and Least Connections support across mixed upstream architectures (TCP and UNIX Sockets).
 - **🗃️ Persistent Warm Pools:** Pre-warmed upstream connection pools to eliminate TCP handshake tail latency on proxy routing.
-- **🛡️ Secure Native TLS:** C-based `OpenSSL` bindings injected into the Assembly pipeline for encrypted transport.
+- **🛡️ Secure Native TLS:** C-based `OpenSSL` bindings injected into the Assembly pipeline for encrypted transport. Features an intelligent **Bifurcated Architecture** ensuring hardware `kTLS` Offload Fast-Paths when available, and gracefully degrading to a C-based `socketpair` thread pool for **TLS 1.3** Userspace Fallbacks without interrupting the Zero-Copy AVX2 async engine.
 
 ---
 
@@ -58,7 +58,26 @@ echo "Hello World" > www/vhost1/index.html
 > [!NOTE]
 > Ensure that a `shiny.conf` routing configuration file is properly set up in the working directory before executing the binary. See [Configuration Documentation](./docs/CONFIGURATION.md) for more details.
 
----
+### 🐳 Docker Deployment
+
+For instant deployment without compiling locally, Shiny includes a multi-stage `scratch` Dockerfile resulting in a hyper-lightweight image (~3.6MB) with absolutely zero privileges.
+
+```bash
+# Build the extremely lightweight image
+docker build -t shiny-server .
+
+# Run the server in standard fallback mode (Synchronous Accept)
+docker run -p 8080:8080 shiny-server
+```
+
+> [!IMPORTANT]
+> **Maximum Performance (`io_uring`) under Docker**  
+> By default, Docker's `seccomp` security profile blocks the `io_uring_setup` system call, forcing Shiny to gracefully downgrade to a slower, synchronous `accept4` fallback mode.  
+> To unlock the raw asynchronous power of the kernel and enable Zero-Copy networking inside the container, you **must** bypass this restriction:
+> ```bash
+> docker run --security-opt seccomp=unconfined -p 8080:8080 shiny-server
+> ```
+> This unlocks the full `io_uring` ring buffers and Multi-shot Accept capabilities shown during a native bare-metal execution.
 
 ## 📚 Documentation
 

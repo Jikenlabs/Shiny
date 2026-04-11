@@ -1,10 +1,10 @@
 ; ==============================================================================
-; Advanced HTTP Web Server in x86_64 Assembly (Linux Ubuntu 24.04)
-; Apache-like features:
-; - Sert les fichiers depuis un dossier racine (./www/)
-; - Utilise sys_sendfile pour des performances maximales (Zero-Copy)
-; - Gère les erreurs 404 (Not Found)
-; - Détecte l'extension (.css vs .html)
+; Advanced HTTP Web Server in x86_64 Assembler (Linux Ubuntu 24.04)
+; “Apache-like” features:
+; - Serves files from a root folder (./www/)
+; - Uses sys_sendfile for maximum performance (Zero-Copy)
+; - Handles 404 (Not Found) errors
+; - Detects extension (.css vs .html)
 ; ==============================================================================
 
 PROXY_POOL_CAP equ 256         ; Max pool array size (BSS). Runtime size from proxy_pool_size_global.
@@ -38,14 +38,14 @@ section .data
 
     ; --- En-têtes HTTP Keep-Alive ---
     hdr_ka_html db "HTTP/1.1 200 OK", 13, 10
-                db "Server: ASM-Apache-Clone", 13, 10
+                db "Server: Shiny", 13, 10
                 db "Connection: keep-alive", 13, 10
                 db "Content-Type: text/html; charset=UTF-8", 13, 10
                 db "Content-Length: "
     hdr_ka_html_len equ $ - hdr_ka_html
 
     hdr_base db "HTTP/1.1 200 OK", 13, 10
-             db "Server: ASM-Apache-Clone", 13, 10
+             db "Server: Shiny", 13, 10
              db "Connection: keep-alive", 13, 10
              db "Content-Type: "
     hdr_base_len equ $ - hdr_base
@@ -56,7 +56,7 @@ section .data
     default_mime_str db "application/octet-stream", 0
 
     hdr_ka_css db "HTTP/1.1 200 OK", 13, 10
-               db "Server: ASM-Apache-Clone", 13, 10
+               db "Server: Shiny", 13, 10
                db "Connection: keep-alive", 13, 10
                db "Content-Type: text/css", 13, 10
                db "Content-Length: "
@@ -66,7 +66,7 @@ section .data
     hdr_cl_end_len equ $ - hdr_cl_end
 
     hdr_ka_json db "HTTP/1.1 200 OK", 13, 10
-                db "Server: ASM-Apache-Clone", 13, 10
+                db "Server: Shiny", 13, 10
                 db "Connection: keep-alive", 13, 10
                 db "Content-Type: application/json", 13, 10
                 db "Content-Length: "
@@ -82,7 +82,7 @@ section .data
     str_cr_bytes_len equ $ - str_cr_bytes
 
     msg_auth_ok db "HTTP/1.1 200 OK", 13, 10
-            db "Server: ASM-Apache-Clone", 13, 10
+            db "Server: Shiny", 13, 10
             db "Content-Type: application/json", 13, 10
             db "Connection: keep-alive", 13, 10
             db "Content-Length: 646", 13, 10, 13, 10
@@ -109,21 +109,21 @@ section .data
     tls_key_path db "/app/server.key", 0
 
     hdr_ka_txt db "HTTP/1.1 200 OK", 13, 10
-               db "Server: ASM-Apache-Clone", 13, 10
+               db "Server: Shiny", 13, 10
                db "Connection: keep-alive", 13, 10
                db "Content-Type: text/plain", 13, 10
                db "Content-Length: "
     hdr_ka_txt_len equ $ - hdr_ka_txt
 
     hdr_404 db "HTTP/1.1 404 Not Found", 13, 10
-            db "Server: ASM-Apache-Clone", 13, 10
+            db "Server: Shiny", 13, 10
             db "Connection: close", 13, 10
             db "Content-Type: text/html; charset=UTF-8", 13, 10, 13, 10
             db "<h1>404 - Fichier introuvable</h1>"
     hdr_404_len equ $ - hdr_404
 
     hdr_405 db "HTTP/1.1 405 Method Not Allowed", 13, 10
-            db "Server: ASM-Apache-Clone", 13, 10
+            db "Server: Shiny", 13, 10
             db "Connection: close", 13, 10
             db "Allow: GET", 13, 10
             db "Content-Length: 0", 13, 10, 13, 10
@@ -173,25 +173,15 @@ section .data
     msg_avx2_ok db "[INFO] AVX2 detecte : Acceleration Materielle du Parsing HTTP ACTIVE (32 octets)", 13, 10
     msg_avx2_ok_len equ $ - msg_avx2_ok
 
+    msg_bind_err db "[FATAL] Bind EADDRINUSE !", 10
+    msg_accept_err db "[FATAL] accept4 failed (ENOTSOCK?)", 10
+    msg_proxy_err db "[WARN] Backend Proxy ferme", 10
     msg_none_ko db "[WARN] Aucun AVX detecte : Parsing HTTP standard (sans acceleration)", 13, 10
     msg_none_ko_len equ $ - msg_none_ko
 
     ; --- UDS Proxy Data ---
     conf_d_path db "./conf.d", 0
     
-    ; static sockaddr_un to avoid stack corruption during async connect
-    align 4
-    sockaddr_un_node dw 1                      ; AF_UNIX
-                     db "/tmp/node.sock", 0
-                     times 93 db 0             ; doc_root length is at saved rcx (8 pushes * 8 = 64 bytes offset)
-
-    msg_newline db 13, 10
-    str_1 db "1", 10
-    str_2 db "2", 10
-    str_3 db "3", 10
-    
-    msg_debug_get db "GET / HTTP/1.1", 13, 10, "Connection: close", 13, 10, 13, 10
-    msg_debug_get_len equ $ - msg_debug_get
     msg_xdp_ok db "[INFO] AF_XDP actif : Court-circuitage TCP/IP etabli (Raw Ethernet). Transfert vers Mode Standard...", 13, 10
     msg_xdp_ok_len equ $ - msg_xdp_ok
 
@@ -236,7 +226,7 @@ section .data
     xdp_ifname db "eth0", 0
 
     ; XDP UMEM registration struct (struct xdp_umem_reg)
-    ; new length = headers only
+    ; { addr, len, chunk_size, headroom, flags }
     xdp_umem_reg:
         xdp_umem_addr dq 0      ; filled at runtime
         xdp_umem_len  dq 2 * 1024 * 1024  ; 2MB
@@ -302,7 +292,7 @@ section .bss
     conf_dir_fd resd 1
     xdp_enabled resb 1
     tls_enabled resb 1
-    handshake_out_buf resq 1
+    handshake_out_buf resb 4108
     zc_enabled resb 1
     uring_enabled resb 1
     uring_fd resd 1
@@ -322,11 +312,11 @@ section .bss
     slot_range_offset resq 65536
     slot_range_end resq 65536
     slot_log_buf resb 16777216 ; 65536 * 256 bytes for async access logs
-    slot_206_hdr resb 16777216 ; checksum (later)
+    slot_206_hdr resb 16777216 ; 65536 * 256 bytes
     client_addr resb 16
     client_addr_len resd 1
-    pipeline_end_buf resq 1
-    pipeline_next_req resq 1
+    slot_pipeline_end_buf resq 200000
+    slot_pipeline_next_req resq 200000
     alignb 32
     buffer resb 4096
     filepath resb 1024
@@ -340,9 +330,11 @@ section .bss
     slot_proxy_fds resd 65536
     slot_proxy_lb_meta resw 65536
     slot_proxy_state resb 65536
+    slot_proxy_te_close resb 65536   ; Flag: force close after TE:chunked response (anti-smuggling)
     slot_proxy_req_len resd 65536
     slot_proxy_resp_total resd 65536
     slot_proxy_resp_received resd 65536
+    slot_proxy_req_ptr resq 65536
     slot_proxy_pipe_len resd 65536
     slot_proxy_sockaddr resb 7208960 ; 65536 * 110 bytes
     slot_proxy_pipe_r resd 65536
@@ -350,7 +342,7 @@ section .bss
     ; --- Proxy Connection Pool (Multifaceted Hash-Map per Route) ---
     proxy_pool_stacks resd 65536          ; [route_id][256] = 256 routes * 256 fds
     proxy_pool_tops   resd 256            ; top indices for each route (0 to 255)
-    slot_proxy_loc_idx resd 65536         ; is_proxy feature flag |||
+    slot_proxy_loc_idx resd 65536         ; tracks which route the slot matched
     proxy_pool_addr  resb 110             ; cached proxy sockaddr
     proxy_pool_addrlen resd 1             ; cached addrlen
     slot_free resd 65536
@@ -402,7 +394,7 @@ section .bss
     fixed_fds resd 16
     ; Per-slot send state: buffer ptr + length for async SEND completion
     send_buf_ptr resq 65536          ; saved buffer ptr per slot
-    send_buf_len resd 65536          ; saved buffer len per slot
+    send_buf_len resd 65536          ; saved buffer lens per slot
     alignb 32
     stat_buf resb 256
 
@@ -474,7 +466,7 @@ _start:
     mov eax, 7
     xor ecx, ecx
     cpuid
-    ; AVX512F = bit 16 of ebx, AVX512BW = bit 30 of ebx
+    ; AVX512F = bit 16 de ebx, AVX512BW = bit 30 de ebx
     mov eax, ebx
     and eax, (1<<16) | (1<<30)
     cmp eax, (1<<16) | (1<<30)
@@ -493,11 +485,11 @@ _start:
 .no_avx512:
     mov byte [avx512_enabled], 0
 
-    ; AVX2 = bit 5 of ebx
+    ; AVX2 = bit 5 de ebx
     test ebx, (1<<5)
     jz .no_avx2
 
-    ; Supported AVX2
+    ; AVX2 supported
     mov byte [avx2_enabled], 1
     mov rax, 1
     mov rdi, 1
@@ -510,8 +502,8 @@ _start:
     mov byte [avx2_enabled], 0
     mov rax, 1
     mov rdi, 1
-    mov rsi, msg_none_ko
-    mov rdx, msg_none_ko_len
+    lea rsi, [msg_bind_err]
+    mov rdx, 29
     syscall
 
 .avx_done:
@@ -785,7 +777,7 @@ _start:
     mov [r15], r11d
     add r15, 4
 
-    ; String address calculation
+    ; String calculation addresses
     ; Jumps emit 24 bytes more (mov rdi, mov r14, jmp open_file)
     mov r10, r15
     add r10, 25                 ; r10 = target_path_addr
@@ -846,6 +838,15 @@ _start:
     jmp .parse_routes
 
 .skip_jit:
+    ; --- W^X ENFORCEMENT: Downgrade JIT memory from RWX to RX (one-time startup cost) ---
+    cmp qword [jit_memory_ptr], 0
+    je .skip_mprotect
+    mov rax, 10              ; sys_mprotect
+    mov rdi, [jit_memory_ptr]
+    mov rsi, 65536           ; length = 64KB
+    mov rdx, 5               ; PROT_READ | PROT_EXEC (remove WRITE)
+    syscall
+.skip_mprotect:
     ; --- END ZERO OVERHEAD ROUTER SETUP ---
     ; --- FIN CONFIGURATION ---
 
@@ -873,14 +874,14 @@ _start:
     ; --- CREATION DES WORKERS (FORK FIRST) ---
 .fork_loop:
     cmp r14, 1
-    jle .worker_init ; The parent process becomes the last worker
+    jle .worker_init ; Parent process becomes last worker
     
     mov rax, 57 ; sys_fork
     syscall
     cmp rax, 0
     je .worker_init ; The child leaves the orchestration loop
     
-    ; Parent continues forking
+    ; The parent continues to fork
     dec r14
     jmp .fork_loop
 
@@ -919,7 +920,7 @@ _start:
 
     ; --- DÉTERMINISME HYPER-STRICT (CPU PINNING) ---
     ; Isolate this worker on its exclusive logical Core (ID = r14)
-    sub rsp, 128             ; Allocate cpu_set_t (128 bytes) on stack
+    sub rsp, 128             ; Allocate cpu_set_t (128 bytes) on the stack
 
     ; Dynamically initializes the Memory Block to 0 (rep stosq)
     mov rcx, 16
@@ -931,7 +932,7 @@ _start:
     mov rdi, rsp
     mov cl, r14b
     mov rax, 1
-    shl rax, cl              ; DEBUG: Print msg_none_ko ("Worker crash") to know proxy closed
+    shl rax, cl              ; Bitshift to target the right Core
     mov [rdi], rax
 
     ; System Call: sched_setaffinity(PID=0, len=128, mask=rsp)
@@ -941,7 +942,7 @@ _start:
     mov rdx, rsp
     syscall
 
-    add rsp, 128             ; Cleans memory
+    add rsp, 128             ; Clean memory
 
     ; Each Worker creates THEIR OWN XDP / INET socket and listens on the same port!
     ; --- 1. SOCKET (AF_XDP Bypass or Standard INET) ---
@@ -1144,7 +1145,7 @@ _start:
     pop r12
 .skip_xdp_setup_log:
 
-    ; Found the first matching index file! index_files[j] + " "
+    ; AF_XDP is ready! Enter the XDP fast-path event loop
     jmp xdp_event_loop
 
 .fallback_inet_cleanup:
@@ -1180,7 +1181,7 @@ _start:
 
 .check_vhost_ports:
     mov ebx, [vhost_count_global]
-    xor ecx, ecx               ; pointer to integer 1
+    xor ecx, ecx               ; i = 0
 .port_vhost_loop:
     cmp ecx, ebx
     jge .bind_ports
@@ -1198,7 +1199,7 @@ _start:
     cmp r10d, r9d
     jge .port_add              ; not found -> add it
     cmp r8w, [bound_ports + r10*2]
-    je .port_v_next            ; dupe -> skip
+    je .port_v_next            ; fool -> skip
     inc r10d
     jmp .port_dupe_loop
     
@@ -1212,7 +1213,7 @@ _start:
     jmp .port_vhost_loop
     
 .bind_ports:
-    xor r15d, r15d             ; pointer to integer 1
+    xor r15d, r15d             ; i = 0
 .bind_loop:
     cmp r15d, [listen_count]
     jge .bind_final_ok
@@ -1278,7 +1279,7 @@ _start:
     mov r8, 4
     syscall
 
-    ; URL parser added 0 bytes → not a directory request
+    ; 3. listen
     mov rax, 50
     mov rdi, r12
     mov rsi, 10000
@@ -1293,8 +1294,8 @@ _start:
     push r12
     mov rax, 1
     mov rdi, 1
-    mov rsi, msg_none_ko
-    mov rdx, msg_none_ko_len
+    lea rsi, [msg_bind_err]
+    mov rdx, 29
     syscall
     pop r12
     mov rax, 60
@@ -1326,7 +1327,6 @@ _start:
     call scan_and_cache_directory
 
     ; --- Duplicates "/" entry for index.html ---
-.cache_done:
     mov ecx, [vhost_count_global]
     xor r15d, r15d      ; i = vhost_id = 0
 .cache_index_loop:
@@ -1379,7 +1379,7 @@ _start:
     test r9, r9
     jz .idx_next        ; Not found in cache table, try next index file
     
-    ; Found the first matching index file! Cache it as "/ ".
+    ; Found the first matching index file! Hide it as "/".
     mov r10, [rdx + 8]  ; len
     mov r11, [rdx + 16] ; etag
     mov rbx, [rdx + 24] ; fd
@@ -1436,7 +1436,7 @@ cache_one_file:
 
     mov r12, rdi            ; save path
     mov rbx, rsi            ; save vhost_id
-    mov r8,  rdx            ; save doc_root len ​​||| 65536 * 256 bytes
+    mov r8,  rdx            ; save doc_root len
 
     ; Open file
     mov rax, 2
@@ -1575,7 +1575,7 @@ cache_one_file:
     crc32 r9, qword [stat_buf + 88]  ; mtime seconds
     crc32 r9, qword [stat_buf + 48]  ; size
 
-    ; Convert r9d to 8 hex chars
+    ; Convert r9d to 8 hex tanks
     mov rcx, 8
     mov r9d, r9d
 .hex_loop:
@@ -1714,7 +1714,8 @@ after_cache_sub:
     syscall
 
 accept_loop:
-    ; 4. accept4 (Blocking Mode for legacy accept loop)
+    ; 4. accept4 (Fallback in case io_uring is forbidden by Docker Seccomp)
+    mov r12d, dword [listen_fds]  ; Restore first socket FD since r12 was overwritten
     mov dword [client_addr_len], 16
     mov rax, 288        ; sys_accept4
     mov rdi, r12
@@ -1735,8 +1736,8 @@ accept_loop:
     push r12
     mov rax, 1
     mov rdi, 1
-    mov rsi, msg_none_ko
-    mov rdx, msg_none_ko_len
+    lea rsi, [msg_accept_err]
+    mov rdx, 35
     syscall
     pop r12
     mov rax, 60
@@ -1788,15 +1789,17 @@ read_request:
     ; --- PIPELINE BUFFER LIMITS ---
     mov r9, rax     ; rax = exact bytes read by sys_read
     add r9, buffer
-    mov [pipeline_end_buf], r9
+    mov r8d, dword [cur_slot]
+    mov [slot_pipeline_end_buf + r8*8], r9
     mov rsi, buffer
 
 read_request_parse_buffer_loop:
     mov r8d, dword [cur_slot]
+    mov [slot_proxy_req_ptr + r8*8], rsi   ; SAVE TRUE START POINTER OF THIS REQUEST
     mov dword [slot_vhost_id + r8*4], 0
     mov qword [slot_range_offset + r8*8], 0
     mov qword [slot_range_end + r8*8], -1
-    mov r9, [pipeline_end_buf]
+    mov r9, [slot_pipeline_end_buf + r8*8]
     cmp rsi, r9
     jl .pipeline_ok
     ; All pipeline requests extracted
@@ -1812,16 +1815,16 @@ read_request_parse_buffer_loop:
     ; Fragmented: not enough bytes
     cmp byte [uring_enabled], 1
     je uring_keepalive_loop
-    jmp read_request           ; \r\nContent-Range: bytes
+    jmp read_request           ; Legacy: blocking read for more data
 .pipeline_has_data:
 
     mov r8d, dword [cur_slot]
-    mov byte [slot_method + r8], 0  ; default to GET (0)
+    mov byte [slot_method + r8], 0  ; default to GET(0)
     
     cmp dword [rsi], 0x20544547   ; “GET”
     je .method_found_4
     
-    ; Check HEAD ("HEAD")
+    ; Check HEAD (“HEAD”)
     cmp dword [rsi], 0x44414548   ; “HEAD”
     jne .check_post
     cmp byte [rsi + 4], ' '
@@ -1831,7 +1834,7 @@ read_request_parse_buffer_loop:
     jmp .method_done
     
 .check_post:
-    cmp dword [rsi], 0x54534F50   ; “POST”
+    cmp dword [rsi], 0x54534F50   ; "POST"
     jne .check_put
     cmp byte [rsi + 4], ' '
     jne close_conn
@@ -1849,7 +1852,7 @@ read_request_parse_buffer_loop:
 .check_delete:
     cmp dword [rsi], 0x454C4544   ; “DELE”
     jne .check_options
-    cmp word [rsi + 4], 0x4554    ; “TE”
+    cmp word [rsi + 4], 0x4554    ; "YOU"
     jne close_conn
     cmp byte [rsi + 6], ' '       ; " "
     jne close_conn
@@ -1893,15 +1896,23 @@ read_request_parse_buffer_loop:
     add rsi, 4
 .method_done:
 
-    ; --- LFI Prevention (Path Traversal) ---
+    ; --- LFI Prevention (Path Traversal + URL Encoding Bypass) ---
     mov r10, rsi
 .lfi_scan:
     cmp r10, r9
     jge .lfi_clean
-    cmp byte [r10], ' '
+    mov al, [r10]
+    cmp al, ' '
     je .lfi_clean
-    cmp byte [r10], '?'
+    cmp al, '?'
     je .lfi_clean
+    ; Block URL-encoded traversal: reject any '%' (prevents %2e%2e, %00, etc.)
+    cmp al, '%'
+    je send_404
+    ; Block null bytes (path truncation attack)
+    test al, al
+    jz send_404
+    ; Block raw "../" traversal
     cmp word [r10], 0x2E2E  ; ".."
     jne .lfi_next
     cmp byte [r10+2], '/'   ; "../"
@@ -2067,13 +2078,13 @@ read_request_parse_buffer_loop:
     call _itoa_8
     mov byte [rdi], '.' 
     inc rdi
-    ; Byte 2
+    ; Bytes 2
     shr r8, 8
     movzx eax, r8b
     call _itoa_8
     mov byte [rdi], '.' 
     inc rdi
-    ; Byte 3
+    ; Bytes 3
     shr r8, 8
     movzx eax, r8b
     call _itoa_8
@@ -2133,7 +2144,10 @@ read_request_parse_buffer_loop:
     ; --- PIPELINE EXTRACTOR ---
     mov [legacy_client_fd], r13  ; Save client_fd before headers clobber r13!
     mov r12, rsi                  ; Copy URI pointer so we can scan forward
-    mov r9, [pipeline_end_buf]
+    push rax
+    mov eax, dword [cur_slot]
+    mov r9, [slot_pipeline_end_buf + rax*8]
+    pop rax
 .scan_headers:
     cmp r12, r9
     jge .headers_end
@@ -2187,7 +2201,7 @@ read_request_parse_buffer_loop:
     jnz .port_nonzero
     movzx edi, word [bound_ports]       ; Default to first bound port if TLS manager wiped it
 .port_nonzero:
-    ; payload length
+    ; SAFEGUARD DELETED: DO NOT CORRUPT rax (It holds the HTTP Host pointer!)
     ; --- PORT FALLBACK: Pre-assign the first vhost that listens on this port ---
     push r14
     push r15
@@ -2216,7 +2230,7 @@ read_request_parse_buffer_loop:
     ; ------------------------------------------------------------------
 
     lea r14, [vhosts]
-    xor r15, r15        ; pointer to integer 1
+    xor r15, r15        ; i = 0
 .vhost_match_loop:
     cmp r15d, ecx
     jge .skip_host_scan
@@ -2334,7 +2348,10 @@ read_request_parse_buffer_loop:
 .found_next:
     add r12, 4                    ; Skip CRLF CRLF
 .headers_end:
-    mov [pipeline_next_req], r12  ; Save the pointer to NEXT coalesced request
+    push rax
+    mov eax, dword [cur_slot]
+    mov [slot_pipeline_next_req + rax*8], r12
+    pop rax
 
     ; --- ZERO OVERHEAD JUMP TABLE ---
     cmp byte [routing_enabled], 1
@@ -2408,6 +2425,15 @@ normal_routing:
     jmp .memcmp_loop
 
 .avx2_proxy_match:
+    ; SIMD OOB guard: ensure 32 bytes available from URI before SIMD load
+    push rcx
+    mov ecx, dword [cur_slot]
+    mov rax, [slot_pipeline_end_buf + rcx*8]
+    pop rcx
+    sub rax, r9
+    cmp rax, 32
+    jl .memcmp_loop              ; Fallback to scalar if < 32 bytes available
+
     vmovdqu ymm0, yword [r9]     ; Load 32 bytes of request URI
     vmovdqu ymm1, yword [r10]    ; Load 32-byte structured location path
     vpcmpeqb ymm2, ymm0, ymm1    ; Parallel byte equality comparison
@@ -2421,7 +2447,7 @@ normal_routing:
 
     and eax, edx
     cmp eax, edx
-    je .proxy_matched            ; SAFEGUARD DELETED: DO NOT CORRUPT rax (It holds the HTTP Host pointer!)
+    je .proxy_matched            ; Exact topological match!
     jmp .next_proxy
 
 .proxy_matched:
@@ -2452,7 +2478,7 @@ normal_routing:
     push rdi
     push rcx
 
-    lea rsi, [r11 + 32]          ; Source: loc.proxy_sockaddr starts at offset 32 ​​||| restore buffer ptr
+    lea rsi, [r11 + 32]          ; Source: loc.proxy_sockaddr starts at offset 32
     mov rdi, r10                 ; Target: slot_proxy_sockaddr + offset
     mov rcx, 14                  ; 14 * 8 = 112 bytes
     rep movsq
@@ -2470,11 +2496,205 @@ normal_routing:
 .handle_proxy_request_dynamic:
     mov r9d, [cur_slot]
 
-    ; --- 1. PREPARE ASYNC PROXY BUFFER (Copy from global to slot if needed) ---
-    sub rsi, 4                  ; Fix: Include "GET " in the buffered proxy request
+    ; --- 1. PREPARE ASYNC PROXY BUFFER ---
+    mov rsi, [slot_proxy_req_ptr + r9*8] ; Retrieve true start of this request
+    mov r12, [slot_pipeline_next_req + r9*8]
+    mov rcx, r12
+    sub rcx, rsi                ; Default to header length
+
+    ; Check if request has body (Method POST=2, PUT=3, PATCH=6)
+    cmp byte [slot_method + r9], 2
+    je .req_parse_cl
+    cmp byte [slot_method + r9], 3
+    je .req_parse_cl
+    cmp byte [slot_method + r9], 6
+    je .req_parse_cl
+    jmp .req_cl_done
+
+.req_parse_cl:
+    push rsi
+    mov r10, r12                ; r10 = End of headers
     
-    mov rcx, [pipeline_end_buf]
-    sub rcx, rsi                ; rcx = length of HTTP request
+    cmp byte [avx2_enabled], 1
+    je .req_cl_simd_dispatch
+    cmp byte [avx512_enabled], 1
+    je .req_cl_simd_dispatch
+    jmp .req_cl_loop_scalar
+
+.req_cl_simd_dispatch:
+    ; --- AVX2 SIMD SETUP for Request Header Scan ---
+    vpbroadcastb ymm1, [rel .c_lower]
+    vpbroadcastb ymm2, [rel .c_upper]
+    vpbroadcastb ymm3, [rel .t_lower]
+    vpbroadcastb ymm4, [rel .t_upper]
+
+.req_cl_loop_avx:
+    mov rax, r10
+    sub rax, rsi
+    cmp rax, 32
+    jb .req_cl_loop_scalar      ; Fallback to scalar for tail
+
+    vmovdqu ymm0, [rsi]
+    vpcmpeqb ymm5, ymm0, ymm1   ; Match 'c'
+    vpcmpeqb ymm6, ymm0, ymm2   ; Match 'C'
+    vpor ymm5, ymm5, ymm6
+    vpcmpeqb ymm6, ymm0, ymm3   ; Match 't'
+    vpor ymm5, ymm5, ymm6
+    vpcmpeqb ymm6, ymm0, ymm4   ; Match 'T'
+    vpor ymm5, ymm5, ymm6
+
+    vpmovmskb eax, ymm5
+    test eax, eax
+    jnz .req_cl_simd_match
+    
+    add rsi, 32
+    jmp .req_cl_loop_avx
+
+.req_cl_simd_match:
+    tzcnt ebx, eax
+    add rsi, rbx
+    
+    ; BOUNDARY CHECK: Must be preceded by \n to prevent X-Content-Length bypass (HTTP Smuggling)
+    cmp rsi, r12
+    jle .req_cl_check             ; If it's the exact start of headers, it's safe
+    cmp byte [rsi-1], 0x0A
+    je .req_cl_check
+    
+    ; False positive (like X-Content-Length), continue searching
+    inc rsi
+    jmp .req_cl_loop_avx
+
+.req_cl_loop_scalar:
+    cmp rsi, r10
+    jge .req_cl_fail
+    mov al, [rsi]
+    or al, 0x20                 ; Lowercase
+    cmp al, 'c'
+    je .req_cl_check
+    cmp al, 't'
+    je .req_cl_check
+    inc rsi
+    jmp .req_cl_loop_scalar
+
+.req_cl_check:
+    ; --- SECURITY: Boundary Verification ---
+    cmp rsi, r12
+    jle .req_cl_check_ok
+    cmp byte [rsi-1], 0x0A
+    jne .req_cl_next
+.req_cl_check_ok:
+    ; Check if it's Content-Length
+    mov rax, [rsi]
+    mov r11, 0x2020202020202020
+    or rax, r11                 ; Case-insensitive check
+    mov r14, 0x2D746E65746E6F63 ; 'content-' (reversed)
+    cmp rax, r14
+    jne .req_te_check
+    
+    ; 'Length' check
+    mov eax, [rsi+8]
+    or eax, 0x20202020
+    cmp eax, 0x6874676E         ; 'long'
+    jne .req_cl_next
+    cmp byte [rsi+13], ':'
+    je .req_cl_matched
+    cmp byte [rsi+14], ':'
+    jne .req_cl_next
+
+.req_cl_matched:
+    ; Point to value start
+    add rsi, 14
+    jmp .skip_cl_spaces
+
+.req_te_check:
+    ; Check for Transfer-Encoding
+    ; 'transfer'
+    mov r14, 0x726566736E617274 ; 'transfer'
+    cmp rax, r14
+    jne .req_cl_next
+    ; '-encodin'
+    mov rax, [rsi+8]
+    mov r11, 0x2020202020202020
+    or rax, r11
+    mov r14, 0x6769646F636E652D ; '-encodin'
+    cmp rax, r14
+    jne .req_cl_next
+    
+    ; Found TE! We don't support it for plain dynamic proxy, fail for safety or infinity.
+    ; NEVER forward HTTP/1.1 chunked bodies to proxy if not parsing them, it causes Pipelined Request Smuggling!
+    ; DROP THE CONNECTION!
+    pop rsi                        ; Restore stack
+    jmp close_conn                 ; Disconnect client maliciously smuggling TE
+
+.req_cl_next:
+    inc rsi
+    jmp .req_cl_loop_avx
+
+.c_lower: db 'c'
+.c_upper: db 'C'
+.t_lower: db 't'
+.t_upper: db 'T'
+
+.req_cl_match:
+    add rsi, 10
+.skip_cl_spaces:
+    cmp byte [rsi], ' '
+    je .skip_cl_space_inc
+    cmp byte [rsi], ':'
+    je .skip_cl_space_inc
+    cmp byte [rsi], 'g'
+    je .skip_cl_space_inc
+    cmp byte [rsi], 't'
+    je .skip_cl_space_inc
+    cmp byte [rsi], 'h'
+    je .skip_cl_space_inc
+    jmp .req_cl_atoi_start
+.skip_cl_space_inc:
+    inc rsi
+    jmp .skip_cl_spaces
+
+.req_cl_atoi_start:
+    xor ebx, ebx
+.req_cl_atoi:
+    movzx eax, byte [rsi]
+    cmp eax, '0'
+    jb .req_cl_found
+    cmp eax, '9'
+    ja .req_cl_found
+    sub eax, '0'
+    imul ebx, 10
+    add ebx, eax
+    inc rsi
+    jmp .req_cl_atoi
+
+.req_cl_found:
+    add rcx, rbx ; add body length to rcx!
+    ; UPDATE pipeline_next_req to include body!
+    add r12, rbx
+    mov [slot_pipeline_next_req + r9*8], r12
+    jmp .req_cl_fail
+
+    jmp .req_cl_fail
+
+.req_cl_fail_with_rc:
+    mov [slot_proxy_req_len + r9*4], ecx ; rcx was set to infinity or calculated len
+.req_cl_fail:
+    pop rsi
+.req_cl_done:
+    ; Check if bounded correctly
+    push r8
+    push rax
+    mov eax, dword [cur_slot]
+    mov r8, [slot_pipeline_end_buf + rax*8]
+    pop rax
+    sub r8, rsi
+    cmp rcx, r8
+    jle .req_cl_ok
+    mov rcx, r8
+.req_cl_ok:
+    pop r8
+    mov [slot_proxy_req_len + r9*4], ecx
+    mov [slot_proxy_req_ptr + r9*8], rsi
 
     ; check if proxy connection already exists (reuse from previous request)
     mov r9d, [cur_slot]
@@ -2544,7 +2764,7 @@ normal_routing:
     ; Least Conn: find min active_connections
     xor ebx, ebx                ; ebx = i
     xor edx, edx                ; edx = best index (default 0)
-    mov r11, 0x7FFFFFFFFFFFFFFF ; max long pos
+    mov r11, 0x7FFFFFFFFFFFFFFF ; max pos long
 .lb_lc_loop:
     cmp ebx, ecx
     jge .lb_apply_server
@@ -2573,7 +2793,7 @@ normal_routing:
     movzx ebx, word [r15 + 40 + rdx*2]    ; CopyFamily
     mov word [r10], bx
 
-    ; Calculate addroffset
+    ; Calculate addr offset
     mov eax, 106
     imul rax, rdx
     lea rSI, [r15 + 72 + rax]              ; Source: addrs[edx]
@@ -2606,7 +2826,10 @@ normal_routing:
     mov eax, r9d
     shl eax, 12
     add rax, [conn_pool]
-    mov r8, [pipeline_end_buf]
+    push rax
+    mov eax, dword [cur_slot]
+    mov r8, [slot_pipeline_end_buf + rax*8]
+    pop rax
     sub r8, rax
     mov [slot_proxy_req_len + r9*4], r8d
 
@@ -2658,7 +2881,10 @@ normal_routing:
     mov eax, r9d
     shl eax, 12
     add rax, [conn_pool]
-    mov r8, [pipeline_end_buf]
+    push rax
+    mov eax, dword [cur_slot]
+    mov r8, [slot_pipeline_end_buf + rax*8]
+    pop rax
     sub r8, rax
     mov [slot_proxy_req_len + r9*4], r8d
 
@@ -2834,23 +3060,6 @@ normal_routing:
     jle .proxy_close
     mov r15, rax        ; bytes read
     
-    ; DEBUG: Dump the payload RECEIVED from Node.js to stderr
-    push rdi
-    push rdx 
-    mov rax, 1
-    mov rdi, 2          ; stderr
-    mov rsi, buffer
-    mov rdx, r15
-    syscall
-    
-    mov rax, 1
-    mov rdi, 2
-    mov rsi, msg_newline
-    mov rdx, 2
-    syscall
-    pop rdx
-    pop rdi
-    
     ; 5. write to client_sock (r13)
     mov rsi, buffer
     mov rdx, r15
@@ -2886,7 +3095,10 @@ normal_routing:
     mov rax, 3          ; sys_close
     mov rdi, r14
     syscall
-    mov rsi, [pipeline_next_req]
+    push rax
+    mov eax, dword [cur_slot]
+    mov rsi, [slot_pipeline_next_req + rax*8]
+    pop rax
     jmp read_request_parse_buffer_loop
 
 .not_proxy:
@@ -2906,7 +3118,7 @@ normal_routing:
     lea rcx, [cache_table]
     shl rax, 6                 ; 64 bytes per entry
     add rcx, rax
-    mov rdx, [rcx + 8]         ; cached length
+    mov rdx, [rcx + 8]         ; hidden length
     test rdx, rdx
     jz .cache_miss              ; not hidden
 
@@ -2918,7 +3130,10 @@ normal_routing:
     ; Cache HIT!
     ; === ETag / 304 Not Modified Check ===
     mov r8, rsi                 ; r8 = start of search (URI start)
-    mov r9, [pipeline_next_req] ; r9 = end of headers
+    push rax
+    mov eax, dword [cur_slot]
+    mov r9, [slot_pipeline_next_req + rax*8]
+    pop rax
     mov r10, [rcx + 16]         ; Load 8-byte hex ETag from cache
 
 .scan_etag:
@@ -2981,7 +3196,7 @@ normal_routing:
 .etag_found:
     mov rax, [r8]               ; Read the client's ETag value
     cmp rax, r10                ; Compare with our cached ETag hash (r10)
-    jne .etag_not_found         ; ||| AF_XDP RAW TCP/IP EVENT LOOP
+    jne .etag_not_found         ; Not match -> send 200 OK
 
     ; ETag matches! Send 304 Not Modified!
     mov rsi, msg_304
@@ -2997,7 +3212,7 @@ normal_routing:
     ; PHASE 5 PIPELINE: Seed the Chunking & Sendfile state
     ; ----------------------------------------------------
     ; rsi = Memory Pointer (Headers + content if < 32KB)
-    ; rdx = Memory Length
+    ; rdx = Memory Length 
     ; rcx = ptr to cache_table entry
     mov r11, [rcx + 24]        ; file_fd
     mov r12, [rcx + 32]        ; total_file_size
@@ -3052,7 +3267,7 @@ normal_routing:
     add rsi, 4
 .head_done:
     sub rsi, r9
-    mov rdx, rsi    ; UNIX FD Proxy
+    mov rdx, rsi    ; new length = headers only
     mov rsi, r9     ; restore original ptr
     mov [slot_mem_remaining + r8*8], rdx
 
@@ -3074,7 +3289,7 @@ normal_routing:
     cmp r9, r12
     jge send_416
     
-    ; Determines END (r10)
+    ; Determine END (r10)
     mov r10, [slot_range_end + r8*8]
     cmp r10, -1
     jne .check_end_bounds
@@ -3117,7 +3332,7 @@ normal_routing:
     pop r8
     pop r10
     
-    ; itoa: convert r15 (file_size) to ASCII at rdi
+    ; \r\nContent-Range: bytes
     mov rsi, str_cr_bytes
     mov rcx, str_cr_bytes_len
     rep movsb
@@ -3195,7 +3410,7 @@ normal_routing:
     mov r8d, [cur_slot]
     cmp r8d, 65535
     je .cache_sync_send
-    ; identification
+    ; Async SEND via io_uring
     mov rsi, [slot_mem_ptr + r8*8]
     mov rdx, [slot_mem_remaining + r8*8]
     ; If the memory buffer is huge (never happens anymore since >32KB is skipped, but just in case)
@@ -3208,7 +3423,7 @@ normal_routing:
     mov r15d, [cqe_saved_tail]
     jmp uring_cqe_continue
 .cache_sync_send:
-    mov r13, [legacy_client_fd] ; Each descriptor: addr(u64) + len(u32) + options(u32) = 16 bytes
+    mov r13, [legacy_client_fd] ; Restore client_fd (r13 was clobbered by vhost matching!)
     mov r8d, [cur_slot]
     mov rsi, [slot_mem_ptr + r8*8]
     mov rdx, [slot_mem_remaining + r8*8]
@@ -3221,17 +3436,23 @@ normal_routing:
     syscall
     cmp rax, 0
     jle close_conn             ; write error
-    sub rdx, rax               ; Close client socket
-    jz .cache_write_done       ; all feels
+    sub rdx, rax               ; remaining bytes
+    jz .cache_write_done       ; all smells
     add rsi, rax               ; advance pointer
     jmp .cache_write_loop
 .cache_write_done:
     ; Pipeline handle next request
-    mov rsi, [pipeline_next_req]
+    push rax
+    mov eax, dword [cur_slot]
+    mov rsi, [slot_pipeline_next_req + rax*8]
+    pop rax
     jmp read_request_parse_buffer_loop
 
 .cache_miss:
-    mov r9, [pipeline_end_buf]  ; CRITICAL FIX: Restore r9 (buffer end) clobbered by proxy_match_loop
+    push rax
+    mov eax, dword [cur_slot]
+    mov r9, [slot_pipeline_end_buf + rax*8]
+    pop rax
     mov rdi, filepath
     
     ; --- FETCH VHOST-SPECIFIC DOC_ROOT ---
@@ -3296,7 +3517,7 @@ avx512_parsing:
     mov rax, r9
     sub rax, rsi
     cmp rax, 64
-    jl copy_path   ; S'il reste moins de 64 octets, on utilise le parsing standard
+    jl copy_path   ; If there are less than 64 bytes left, we use standard parsing
 
     ; Load 64 bytes of URL structure
     vmovdqu8 zmm0, [rsi]
@@ -3334,7 +3555,7 @@ avx512_parsing:
     mov rcx, rax
 
 .do_copy:
-    ; Copy EXACTLY the URL part (multiple reading speed via vectorized scan)
+    ; Copy EXACTLY the URL part (multipled reading speed via vectorized scan)
     rep movsb
     jmp end_path
 
@@ -3363,7 +3584,7 @@ avx2_parsing:
     mov rax, r9
     sub rax, rsi
     cmp rax, 32
-    jl copy_path   ; If there are less than 32 bytes remaining, we use the standard parsing
+    jl copy_path   ; If there are less than 32 bytes remaining, we use standard parsing
 
     ; Load 32 bytes of URL structure
     vmovdqu ymm0, [rsi]
@@ -3430,7 +3651,7 @@ end_path:
     jne save_filepath_end
     ; Only auto-index if the '/' came from the URL (not the doc_root trailing slash)
     cmp rdi, [filepath_root_end]
-    jle save_filepath_end          ; Async SEND via io_uring
+    jle save_filepath_end          ; URL parser added 0 bytes → not a directory request
     
     ; --- Dynamic Auto-Indexation ---
     mov r10, rdi               ; save original end pointer
@@ -3542,7 +3763,7 @@ open_file_success:
     rep movsb
 
 .append_content_length:
-    ; 3. listen
+    ; itoa: convert r15 (file_size) to ASCII at rdi
     mov rax, r15
     lea r8, [itoa_buf + 20]
     mov byte [r8], 0
@@ -3799,7 +4020,10 @@ send_file_cork_off:
     syscall
 
     ; === KEEP-ALIVE: pipeline ===
-    mov rsi, [pipeline_next_req]
+    push rax
+    mov eax, dword [cur_slot]
+    mov rsi, [slot_pipeline_next_req + rax*8]
+    pop rax
     jmp read_request_parse_buffer_loop
 
 uring_keepalive_loop:
@@ -3987,7 +4211,7 @@ uring_submit_poll_add_sqe:
     movdqu [r9+48], xmm0
     pop r8
     mov byte [r9], 6              ; IORING_OP_POLL_ADD
-    mov dword [r9 + 4], r13d      ; fd = customer
+    mov dword [r9 + 4], r13d      ; fd = client
     mov dword [r9 + 28], 4        ; poll32_events = POLLOUT (4)
     
     ; user_data = 0x40000 + slot_idx (type 4 = POLL_ADD)
@@ -4027,11 +4251,11 @@ uring_submit_read_sqe:
     movdqu [r9+48], xmm0
     pop r8
     mov byte [r9], 22             ; IORING_OP_READ (standard, sockets need offset=-1)
-    mov dword [r9 + 4], r13d     ; fd = customer
+    mov dword [r9 + 4], r13d     ; fd = client
     mov qword [r9 + 8], -1       ; offset = -1 (socket, mandatory)
-    ; If less than 64 bytes remain, we use the standard parsing
+    ; Buffer = conn_pool + slot * 4096
     mov eax, r8d
-    shl eax, 12                   ; slot * 4096
+    shl eax, 12                   ; slot*4096
     add rax, [conn_pool]
     mov qword [r9 + 16], rax     ; buffer addr
     mov dword [r9 + 24], 4096    ; len
@@ -4066,7 +4290,7 @@ uring_submit_proxy_read_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     pxor xmm0, xmm0
     movdqu [r9], xmm0
     movdqu [r9+16], xmm0
@@ -4078,9 +4302,9 @@ uring_submit_proxy_read_sqe:
     mov dword [r9 + 4], r14d      ; fd = proxy_fd
     mov qword [r9 + 8], -1        ; offset = -1
     
-    ; If less than 64 bytes remain, we use the standard parsing
+    ; Buffer = conn_pool + slot * 4096
     mov eax, r8d
-    shl eax, 12                   ; slot * 4096
+    shl eax, 12                   ; slot*4096
     add rax, [conn_pool]
     mov qword [r9 + 16], rax      ; buffer addr
     mov dword [r9 + 24], 4096     ; len
@@ -4133,14 +4357,14 @@ decrement_lb_meta:
 ; Clobbers: rax, rcx, rdx, r8, r9
 proxy_pool_acquire:
     mov ecx, [cur_slot]
-    mov edx, [slot_proxy_loc_idx + rcx*4]  ; edx = route_id
+    mov edx, [slot_proxy_loc_idx + rcx*4]  ; edx = id_route
     mov eax, [proxy_pool_tops + rdx*4]
     test eax, eax
     jz .pool_acq_empty
     dec eax
     mov [proxy_pool_tops + rdx*4], eax
 
-    ; Add IORING_OP_READ to tls_res_fd[0] to accept handshaked TLS clients
+    ; Array offset: proxy_pool_stacks + (id_route * 1024) + (eax * 4)
     mov r8, rdx
     shl r8, 10
     lea r9, [proxy_pool_stacks + r8]
@@ -4154,12 +4378,12 @@ proxy_pool_release:
     ; (No LB modifications here because proxy connections exist seamlessly)
 
     mov ecx, [cur_slot]
-    mov edx, [slot_proxy_loc_idx + rcx*4]  ; edx = route_id
+    mov edx, [slot_proxy_loc_idx + rcx*4]  ; edx = id_route
     mov eax, [proxy_pool_tops + rdx*4]
     cmp eax, [proxy_pool_size_global]
     jge .pool_rel_full
 
-    ; Add IORING_OP_READ to tls_res_fd[0] to accept handshaked TLS clients
+    ; Array offset: proxy_pool_stacks + (id_route * 1024) + (eax * 4)
     mov r8, rdx
     shl r8, 10
     lea r9, [proxy_pool_stacks + r8]
@@ -4183,7 +4407,7 @@ proxy_pool_release:
 proxy_pool_create_one:
     ; socket(Family, SOCK_STREAM, 0)
     mov rax, 41
-    movzx rdi, word [proxy_pool_addr]  ; window size = 65535 (network byte order swap later)
+    movzx rdi, word [proxy_pool_addr]  ; Load AF_UNIX or AF_INET dynamically
     mov rsi, 1                 ; SOCK_STREAM
     xor rdx, rdx
     syscall
@@ -4203,7 +4427,7 @@ proxy_pool_create_one:
     ; rdi already has fd
     mov rsi, 6                 ; IPPROTO_TCP
     mov rdx, 1                 ; TCP_NODELAY
-    mov r10, rsp               ; r14 * 1024
+    mov r10, rsp               ; pointer to integer 1
     mov r8, 4                  ; sizeof(int)
     syscall
     add rsp, 8
@@ -4248,7 +4472,7 @@ uring_submit_proxy_connect_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     pxor xmm0, xmm0
     movdqu [r9], xmm0
     movdqu [r9+16], xmm0
@@ -4256,7 +4480,7 @@ uring_submit_proxy_connect_sqe:
     movdqu [r9+48], xmm0
     pop r8
     
-    mov byte [r9], 16             ; error or EOF → close
+    mov byte [r9], 16             ; IORING_OP_CONNECT
     mov r14d, [slot_proxy_fds + r8*4]
     mov dword [r9 + 4], r14d      ; fd = proxy_fd
     
@@ -4264,7 +4488,7 @@ uring_submit_proxy_connect_sqe:
     mov eax, r8d
     imul eax, eax, 110
     lea r10, [slot_proxy_sockaddr + rax]
-    mov qword [r9 + 16], r10      ; addr = sockaddr_a ptr
+    mov qword [r9 + 16], r10      ; addr = sockaddr_un ptr
     mov qword [r9 + 8], 0         ; offset
     
     ; Compute EXACT addrlen = 2 (family) + strlen(sun_path) + 1 (null byte)
@@ -4311,7 +4535,7 @@ uring_submit_proxy_send_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     pxor xmm0, xmm0
     movdqu [r9], xmm0
     movdqu [r9+16], xmm0
@@ -4383,7 +4607,7 @@ uring_submit_proxy_poll_sqe:
     
     mov byte [r9], 6              ; IORING_OP_POLL_ADD
     mov eax, [slot_proxy_fds + r8*4]
-    mov dword [r9 + 4], eax       ; fd = socket proxy
+    mov dword [r9 + 4], eax       ; fd = proxy socket
     mov dword [r9 + 28], 1        ; poll32_events = POLLIN (1)
     
     ; user_data = 0x90000 + slot_idx (type 9 = PROXY POLL)
@@ -4416,7 +4640,7 @@ uring_submit_proxy_splice_in_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     pxor xmm0, xmm0
     movdqu [r9], xmm0
     movdqu [r9+16], xmm0
@@ -4463,7 +4687,7 @@ uring_submit_proxy_splice_out_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     pxor xmm0, xmm0
     movdqu [r9], xmm0
     movdqu [r9+16], xmm0
@@ -4513,7 +4737,7 @@ uring_submit_send_sqe:
     mov r9, [sqes]
     mov r10d, r8d
     shl r10, 6
-    add r9, r10                    ; r9 = SQE point
+    add r9, r10                    ; r9 = SQE pointer
     ; Zero the SQE
     pxor xmm0, xmm0
     movdqu [r9], xmm0
@@ -4533,8 +4757,8 @@ uring_submit_send_sqe:
 .zc_disable:
     mov byte [r9], 26              ; IORING_OP_SEND (Legacy copy)
 .zc_done:
-    mov dword [r9 + 4], r13d      ; fd = socket client
-    pop rsi                        ; Data not ready yet. Resubmit READ SQE
+    mov dword [r9 + 4], r13d      ; fd = client socket
+    pop rsi                        ; restore buffer ptr
     mov qword [r9 + 16], rsi      ; addr = buffer
     pop rdx                        ; restore length
     mov dword [r9 + 24], edx      ; len
@@ -4745,7 +4969,7 @@ uring_setup:
     mov r9, 0
     syscall
 
-    ; Log multi-shot accepted
+    ; Multi-shot log accepted
     push r12
     mov rax, 1
     mov rdi, 1
@@ -4757,7 +4981,7 @@ uring_setup:
 
     ; ==============================================================
     ; TLS HANDSHAKE PIPELINE SETUP (per-worker)
-    ; synchronous sys_close is fine for backend cleanup during disconnect
+    ; Add IORING_OP_READ to tls_res_fd[0] to accept handshaked TLS clients
     ; ==============================================================
     cmp byte [tls_enabled], 1
     jne .skip_tls_res_poll
@@ -4787,7 +5011,7 @@ uring_setup:
     mov qword [r9 + 8], -1      ; offset = -1 (pipe stream)
     mov rax, handshake_out_buf
     mov qword [r9 + 16], rax    ; addr
-    mov dword [r9 + 24], 8      ; len = 8 (fd + port)
+    mov dword [r9 + 24], 4108   ; len = Header(12) + Data(4096)
     
     ; user_data = TYPE_TLS_REPLY (Type 11: 0xB0000)
     mov rax, 0xB0000
@@ -4870,7 +5094,7 @@ uring_setup:
     jmp .pool_len_done
 
 .pool_inet_len:
-    ; Clear trackers for the next Keep-Alive request on this client
+    ; AF_INET: fixed length 16
     mov dword [proxy_pool_addrlen], 16
 
 .pool_len_done:
@@ -4880,7 +5104,7 @@ uring_setup:
     mov rax, rcx
     shl rax, 4
     add rax, rdx
-    mov r14, rax              ; r14 = route_id (0..255)
+    mov r14, rax              ; r14 = id_route (0..255)
     pop rax
     
     ; ------------- GLOBAL WARM POOL INITIALIZER -------------
@@ -4897,7 +5121,7 @@ uring_setup:
     cmp eax, 0
     jl .pool_warm_fail
     
-    ; tracks which route the slot matched
+    ; Push ready FD into the stack array for this id_route
     ; Dest: proxy_pool_stacks[id_route][top]
     ; eax is FD
     push r11
@@ -4905,7 +5129,7 @@ uring_setup:
     mov r11d, dword [proxy_pool_tops + r14*4]
     
     ; Addr = proxy_pool_stacks + (r14 * 256 * 4) + (r11 * 4)
-    ; Padding up to 110 bytes total
+    ; r14*1024
     push rdx
     mov rdi, r14
     shl rdi, 10
@@ -4960,19 +5184,40 @@ uring_setup:
 
 ; ==============================================================================
 ; Subroutine: Write access log to log_fd via io_uring
-; Inputs: r15 = buffer address
+; Inputs: r15 = buffer address, rdx = length
 ; Uses cur_slot for user_data
 ; ==============================================================================
 submit_access_log_async:
     cmp byte [access_log_enabled], 1
     jne .log_done
     
+    cmp byte [uring_enabled], 1
+    je .uring_log
+    
+    ; Legacy synchronous fallback
+    push rax
+    push rdi
+    push rsi
+    push rdx
+    mov rax, 1           ; sys_write
+    mov edi, [log_fd]
+    mov rsi, r15
+    ; rdx already contains length
+    syscall
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    jmp .log_done
+    
+.uring_log:
+    
     ; Setup IORING_OP_WRITE (opcode 26)
     push r8
     mov rcx, [sq_ring]
     mov r8d, [uring_params + 44]  ; sq_tail_off is 44!
     mov eax, [rcx + r8]           ; copy sq_tail
-    mov ebx, [uring_params + 48]  ; Poll the RX ring for incoming packets
+    mov ebx, [uring_params + 48]  ; sq_mask_off
     and eax, [rcx + rbx]          ; fetch mask from sq_ring + sq_mask_off
     shl rax, 6
     mov r9, [sqes]
@@ -5079,7 +5324,7 @@ uring_cqe_continue:
     cmp r8d, r15d
     je uring_event_loop
 
-    ; Get EQC
+    ; Get CQE
     mov r9d, r8d
     mov ebx, [uring_params + 88]
     and r9d, [rcx + rbx]
@@ -5089,17 +5334,17 @@ uring_cqe_continue:
     shl r9, 4
     add r10, r9
 
-    mov r14, [r10]                ; It was completely sent on the first userspace pass!
+    mov r14, [r10]                ; user_data
     mov eax, [r10 + 8]           ; res
 
-    ; Advance CQ head
+    ; Advance QC head
     inc r8d
     mov rcx, [cq_ring]
     mov ebx, [uring_params + 80]
     mov [rcx + rbx], r8d
 
     ; === Dispatch ===
-    ; Ignore zero-copy notification CQEs
+    ; Ignore zero-copy CQEs notifications
     mov ebx, [r10 + 12]
     test ebx, 8                  ; IORING_CQE_F_NOTIF
     jnz skip_cqe
@@ -5136,8 +5381,8 @@ uring_cqe_continue:
 
 handle_tls_reply:
     ; eax = bytes read
-    cmp eax, 8
-    jne skip_cqe    ; Ignore incomplete TLS pipe reads
+    cmp eax, 12
+    jl skip_cqe    ; Ignore incomplete TLS pipe reads
     
     ; Re-submit the pipe READ to catch the next client
     push r10
@@ -5169,7 +5414,7 @@ handle_tls_reply:
     mov qword [r9 + 8], -1
     mov rax, handshake_out_buf
     mov qword [r9 + 16], rax
-    mov dword [r9 + 24], 8
+    mov dword [r9 + 24], 4108   ; Read Header(12) + Data(4096)
     
     mov rax, 0xB0000
     mov qword [r9 + 32], rax
@@ -5181,10 +5426,11 @@ handle_tls_reply:
     pop rax
     pop r8
     pop r10
-
-    ; Extract handshaked fd and preserved physical port!
+ 
+    ; Extract handshaked fd, port AND data_len!
     mov r13d, [handshake_out_buf]
     mov r14d, [handshake_out_buf + 4]
+    mov r11d, [handshake_out_buf + 8]  ; r11d = data_len
     
     mov [cqe_saved_head], r8d
     mov [cqe_saved_tail], r15d
@@ -5200,8 +5446,41 @@ handle_tls_reply:
     mov r8d, eax
     mov [slot_listen_fds + r8*4], r14d   ; RESTORE PORT MAPPING FOR VHOST MATCHING!
     mov [slot_fds + rax*4], r13d
-    ; Removed erroneous zeroing of slot_listen_fds here, we just set it!
-    ; Submit READ SQE to wait for the HTTP request over kTLS!
+    
+    ; --- RESTORED: TLS 1.3 PRE-BUFFER HANDOFF ---
+    test r11d, r11d
+    jz .submit_tls_read
+
+    ; Safety check: do we have the full data promised by data_len?
+    lea r9d, [r11d + 12]
+    cmp eax, r9d
+    jl .submit_tls_read              ; If incomplete, fallback to standard read logic
+
+    ; Pre-buffered decrypted data found! (Managed handoff for TLS 1.3 desync)
+    mov rax, r8                     ; cur_slot
+    shl rax, 12                     ; 4096 bytes per slot
+    mov rdi, [conn_pool]
+    test rdi, rdi
+    jz .submit_tls_read              ; Safety check!
+    add rdi, rax                    ; rdi = destination
+    
+    push rdi                        ; Save start of buffer
+    lea rsi, [handshake_out_buf + 12] ; source data
+    mov ecx, r11d                   ; length
+    cld                             ; Clear direction flag for rep movsb!
+    rep movsb                       ; Copy decrypted request to slot!
+    pop rdi                         ; Restore start of buffer
+    
+    ; Prepare pipeline constraints
+    mov r9, rdi
+    add r9, r11                     ; end = start + data_len
+    mov [slot_pipeline_end_buf + r8*8], r9
+    mov [slot_pipeline_next_req + r8*8], r9
+    
+    mov rsi, rdi                    ; rsi = start of request for parser
+    jmp read_request_parse_buffer_loop
+
+.submit_tls_read:
     mov r8d, dword [cur_slot]
     call uring_submit_read_sqe
     mov r8d, [cqe_saved_head]
@@ -5250,7 +5529,7 @@ handle_proxy_splice_out_cqe:
     cmp eax, 0
     jle close_conn  ; If pipe->client fails, close everything
     
-    ; Send 502 tracking message using sys_write to client
+    ; SPLICE_OUT completed. The proxy socket was perfectly chunked via MSG_PEEK calculation!
     ; We MUST recycle the backend socket to Keep-Alive!
     mov r14d, [slot_proxy_fds + r8*4]
     push r8
@@ -5275,7 +5554,7 @@ proxy_stale_cqe:
     jmp uring_cqe_continue
 
 handle_proxy_connect_cqe:
-    ; The proxy socket is officially Connected Asynchronously (Non-Blocking)
+    ; The proxy socket is officially Connected asynchronously (Non-Blocking)
     ; eax contains the return code (0 = OK)
     and r14d, 0xFFFF
     mov r8d, r14d          ; r8d = slot
@@ -5287,11 +5566,8 @@ handle_proxy_connect_cqe:
     cmp eax, 0
     jl proxy_emit_502     ; 502 Bad Gateway if UNIX Connect failed!
     
-    ; Retrieve the Client Request Pointer (initial buffer)
-    mov eax, r8d
-    shl eax, 12            ; slot * 4096 = offset buffer
-    add rax, [conn_pool]
-    mov rsi, rax           ; rsi = request data
+    ; Retrieve the TRUE Pointer from the Client Request
+    mov rsi, [slot_proxy_req_ptr + r8*8]
     
     ; The exact length was calculated before the async gap:
     mov edx, [slot_proxy_req_len + r8*4]
@@ -5333,7 +5609,7 @@ proxy_emit_502:
     mov dword [slot_proxy_fds + r8*4], 0
     mov byte [slot_proxy_state + r8], 0
     
-    ; RX ring structure: producer(4B), pad(4B), consumer(4B), pad(4B), flags(4B), pad(12B), desc[]
+    ; Send 502 tracking message using sys_write to client
     mov r13d, [slot_fds + r8*4]
     mov rax, 1
     mov rdi, r13
@@ -5350,7 +5626,7 @@ proxy_emit_502:
     mov [cur_slot], r8d
     mov dword [cur_slot], 65535    ; prevent close_conn from double-freeing slot
     
-    ; i = 0
+    ; Close client socket
     mov rax, 3
     mov rdi, r13
     syscall
@@ -5381,7 +5657,7 @@ handle_proxy_poll_cqe:
     mov [cqe_saved_head], r8d
     mov [cqe_saved_tail], r15d
     
-    ; The proxy socket is READY TO BE READ (Backend has responded!)
+    ; The socket proxy is READY TO BE READ (Backend has responded!)
     and r14d, 0xFFFF
     mov r8d, r14d          ; r8d = slot index
     
@@ -5426,13 +5702,13 @@ handle_proxy_read_cqe:
     
     ; === PHASE 2: PARSE CONTENT-LENGTH ===
     mov edi, r8d
-    shl edi, 12            ; slot * 4096
+    shl edi, 12            ; slot*4096
     mov rsi, [conn_pool]
     add rsi, rdi           ; rsi = ptr to current buffer
     
     mov rcx, rsi
     mov rdx, rsi
-    add rdx, r12           ; Load 32 bytes of URL structure
+    add rdx, r12           ; max bound = buffer + bytes_read! (NOT 4096)
 
     ; --- AVX2 SIMD SETUP for \r\n\r\n ---
     mov eax, 0x0D0D0D0D
@@ -5440,7 +5716,7 @@ handle_proxy_read_cqe:
     vpbroadcastd ymm1, xmm1 ; ymm1 = [ \r, \r, ... ]
     
     mov r10, rdx
-    sub r10, 32            ; match -> send 200 OK
+    sub r10, 32            ; r10 = safe AVX2 limit (to avoid Page Fault / OOB read)
     cmp rcx, r10
     jae .proxy_find_end_scalar
     
@@ -5496,8 +5772,15 @@ handle_proxy_read_cqe:
     mov rdx, rsi
     add rdx, r11           ; only scan for Content-Length within Headers!
 
+    cmp byte [avx2_enabled], 1
+    je .proxy_cl_simd_start
+    cmp byte [avx512_enabled], 1
+    je .proxy_cl_simd_start
+    jmp .proxy_find_cl_scalar
+
+.proxy_cl_simd_start:
     ; --- AVX2 SIMD SETUP for Content-Length ---
-    mov eax, 0x43434343    ; Restore client_fd (r13 was clobbered by vhost matching!)
+    mov eax, 0x43434343    ; 'C'
     vmovd xmm1, eax
     vpbroadcastd ymm1, xmm1
     
@@ -5506,19 +5789,27 @@ handle_proxy_read_cqe:
     vpbroadcastd ymm3, xmm3
     
     mov r10, rdx
-    sub r10, 32
+    sub r10, 32      ; safe bound for SIMD
     cmp rcx, r10
     jae .proxy_find_cl_scalar
     
 .proxy_find_cl_avx2:
     vmovdqu ymm0, [rcx]
-    vpcmpeqb ymm2, ymm0, ymm1 ; Match 'C'
-    vpcmpeqb ymm4, ymm0, ymm3 ; Match 'c'
-    vpor ymm2, ymm2, ymm4     ; Match 'c' OR 'C'
+    vpcmpeqb ymm2, ymm0, ymm1   ; Match 'C'
+    vpcmpeqb ymm4, ymm0, ymm3   ; Match 'c'
+    vpor ymm2, ymm2, ymm4
+    
+    ; NEW: Add 'T'/'t' for Transfer-Encoding detection in SIMD
+    vpbroadcastb ymm4, [rel .t_upper]
+    vpcmpeqb ymm5, ymm0, ymm4
+    vpor ymm2, ymm2, ymm5
+    vpbroadcastb ymm4, [rel .t_lower]
+    vpcmpeqb ymm5, ymm0, ymm4
+    vpor ymm2, ymm2, ymm5
     
     vpmovmskb eax, ymm2
     test eax, eax
-    jz .proxy_find_cl_avx2_next
+    jnz .proxy_find_cl_avx2_tzcnt
 
 .proxy_find_cl_avx2_tzcnt:
     tzcnt ebx, eax
@@ -5526,6 +5817,13 @@ handle_proxy_read_cqe:
     push rcx
     add rcx, rbx         ; rcx points to 'C' or 'c'
     
+    ; --- SECURITY: Boundary Verification ---
+    cmp rcx, rsi
+    jle .avx2_cl_bound_ok
+    cmp byte [rcx-1], 0x0A
+    jne .avx2_cl_fail
+.avx2_cl_bound_ok:
+
     ; Ensure enough space in buffer
     mov r14, rdx
     sub r14, rcx
@@ -5534,7 +5832,7 @@ handle_proxy_read_cqe:
 
     inc rcx              ; point to 'o'
     ; 'ontent-length: ' = 0x6f 6e 74 65 6e 74 2d 6c 65 6e 67 74 68 3a 20
-    mov r9, 0x6C2D746E65746E6F  ; 'ontent-l'
+    mov r9, 0x6C2D746E65746E6F  ; 'have it'
     mov r13, 0x4C2D746E65746E6F ; 'have it'
     mov r14, [rcx]
     
@@ -5550,10 +5848,24 @@ handle_proxy_read_cqe:
     jne .avx2_cl_fail
     
     ; Match found!
+    mov al, [rcx+rbx]
+    or al, 0x20
+    cmp al, 't'
+    je .avx2_te_matched
+
     pop rcx
     add rcx, rbx
-    add rcx, 15            ; Dot past 'h:'
+    add rcx, 15            ; Dot past 'Content-Length:'
     jmp .proxy_atoi_setup
+
+.avx2_te_matched:
+    pop rcx
+    add rcx, rbx
+    ; Found Transfer-Encoding in SIMD!
+    ; SECURITY: Mark for forced close — no keep-alive, prevents response smuggling
+    mov dword [slot_proxy_resp_total + r8*4], 0x7FFFFFFF
+    mov byte [slot_proxy_te_close + r8], 1    ; Force close after forwarding
+    jmp .proxy_read_send_zc
 
 .avx2_cl_fail:
     pop rcx
@@ -5561,10 +5873,12 @@ handle_proxy_read_cqe:
     test eax, eax
     jnz .proxy_find_cl_avx2_tzcnt
 
-.proxy_find_cl_avx2_next:
     add rcx, 32
     cmp rcx, r10
     jb .proxy_find_cl_avx2
+
+.t_lower: db 't'
+.t_upper: db 'T'
     
 .proxy_find_cl_scalar:
     mov rax, rdx
@@ -5577,12 +5891,55 @@ handle_proxy_read_cqe:
     je .proxy_cl_scalar_check
     cmp al, 'c'
     je .proxy_cl_scalar_check
+    cmp al, 'T'
+    je .proxy_te_scalar_check
+    cmp al, 't'
+    je .proxy_te_scalar_check
     inc rcx
     jmp .proxy_find_cl_scalar
-    
-.proxy_cl_scalar_check:
+
+.proxy_te_scalar_check:
+    ; --- SECURITY: Boundary Verification ---
+    cmp rcx, rsi
+    jle .proxy_te_bound_ok
+    cmp byte [rcx-1], 0x0A
+    jne .proxy_find_cl_scalar_resume
+.proxy_te_bound_ok:
     inc rcx
-    mov r9, 0x6C2D746E65746E6F  ; 'ontent-l'
+    ; 'ransfer-' = 0x2D726566736E6172
+    mov r14, [rcx]
+    mov r9, 0x2D726566736E6172
+    cmp r14, r9
+    jne .proxy_find_cl_scalar
+    ; 'Encoding' = 0x676E69646F636E45
+    mov r14, [rcx+8]
+    mov r9, 0x676E69646F636E45 ; 'Encoding'
+    mov r13, 0x676E69646F636E65 ; 'encoding'
+    cmp r14, r9
+    je .te_found
+    cmp r14, r13
+    jne .proxy_find_cl_scalar
+.te_found:
+    ; It's Transfer-Encoding! Default it to chunked for now.
+    ; SECURITY: Mark for forced close — no keep-alive, prevents response smuggling
+    mov dword [slot_proxy_resp_total + r8*4], 0x7FFFFFFF
+    mov byte [slot_proxy_te_close + r8], 1    ; Force close after forwarding
+    jmp .proxy_read_send_zc
+
+    
+.proxy_find_cl_scalar_resume:
+    inc rcx
+    jmp .proxy_find_cl_scalar
+
+.proxy_cl_scalar_check:
+    ; --- SECURITY: Boundary Verification ---
+    cmp rcx, rsi
+    jle .proxy_scalar_bound_ok
+    cmp byte [rcx-1], 0x0A
+    jne .proxy_find_cl_scalar_resume
+.proxy_scalar_bound_ok:
+    inc rcx
+    mov r9, 0x6C2D746E65746E6F  ; 'have it'
     mov r13, 0x4C2D746E65746E6F ; 'have it'
     mov r14, [rcx]
     cmp r14, r9
@@ -5637,6 +5994,10 @@ handle_proxy_read_cqe:
     jl .proxy_read_incomplete
     
     ; 100% of proxy response is received!
+    ; SECURITY: Check if TE:chunked response — if so, close instead of keep-alive (anti-smuggling)
+    cmp byte [slot_proxy_te_close + r8], 1
+    je .proxy_te_force_close
+    
     ; Recycle Node backend connection back to pool
     mov r14d, [slot_proxy_fds + r8*4]
     push r8
@@ -5653,6 +6014,29 @@ handle_proxy_read_cqe:
     
     ; Mark proxy routing END, client socket will resume Keep-Alive!
     mov byte [slot_proxy_state + r8], 0
+    jmp .proxy_read_incomplete
+
+.proxy_te_force_close:
+    ; TE:chunked response completed — close backend + client to prevent smuggling
+    mov byte [slot_proxy_te_close + r8], 0  ; Reset flag
+    mov byte [slot_proxy_state + r8], 0
+    mov dword [slot_proxy_resp_total + r8*4], 0
+    mov dword [slot_proxy_resp_received + r8*4], 0
+    
+    ; Close backend socket (don't recycle to pool — it may have leftover data)
+    mov r14d, [slot_proxy_fds + r8*4]
+    cmp r14d, 0
+    jle .proxy_te_skip_backend_close
+    push r8
+    mov rax, 3
+    mov rdi, r14
+    syscall
+    pop r8
+.proxy_te_skip_backend_close:
+    mov dword [slot_proxy_fds + r8*4], 0
+    mov [cur_slot], r8d
+    mov r13d, [slot_fds + r8*4]
+    jmp close_conn              ; Close client connection cleanly
     
 .proxy_read_incomplete:
     ; Initiate SEND_ZC to the Client socket
@@ -5682,17 +6066,17 @@ proxy_eof:
     mov r14d, [slot_proxy_fds + r8*4]
     ; Convert slot index to FDs
     mov r13d, [slot_fds + r8*4]     ; TCP FD client
-    mov r14d, [slot_proxy_fds + r8*4] ; Proxy UNIX FD
+    mov r14d, [slot_proxy_fds + r8*4] ; UNIX FD Proxy
 
-    ; sq_mask_off
+    ; DEBUG: Print msg_none_ko ("Worker crash") to know proxy closed
     push rax
     push rdi
     push rsi
     push rdx
     mov rax, 1
     mov rdi, 1
-    lea rsi, [msg_none_ko]
-    mov rdx, 13
+    lea rsi, [msg_proxy_err]
+    mov rdx, 22
     syscall
     pop rdx
     pop rsi
@@ -5719,6 +6103,7 @@ proxy_eof:
     mov dword [slot_proxy_fds + r8*4], 0
     mov dword [slot_fds + r8*4], 0
     mov byte [slot_proxy_state + r8], 0
+    mov byte [slot_proxy_te_close + r8], 0  ; Clean TE flag on EOF
     
     mov dword [slot_proxy_resp_total + r8*4], 0
     mov dword [slot_proxy_resp_received + r8*4], 0
@@ -5729,6 +6114,10 @@ proxy_eof:
     inc eax
     mov [slot_top], eax
 
+    cmp byte [uring_enabled], 1
+    je .uring_cont
+    jmp accept_loop
+.uring_cont:
     jmp uring_cqe_continue
 
 handle_accept:
@@ -5740,7 +6129,7 @@ handle_accept:
     and r9d, 0xFFFF
     mov r14d, r9d       ; r14d is now purely the network port!
 
-    mov r13d, eax                 ; Customer FD
+    mov r13d, eax                 ; FD customer
     mov [cqe_saved_head], r8d
     mov [cqe_saved_tail], r15d
 
@@ -5832,14 +6221,15 @@ handle_accept:
 
     mov r9, rax
     add r9, rsi
-    mov [pipeline_end_buf], r9    ; <=== FIX: Init pipeline constraints
-    mov [pipeline_next_req], r9   ; <=== FIX: Init ETag scan boundary bounds
+    mov r8d, dword [cur_slot]
+    mov [slot_pipeline_end_buf + r8*8], r9
+    mov [slot_pipeline_next_req + r8*8], r9
 
     ; rsi already points to start of slot buffer
     jmp read_request_parse_buffer_loop
 
 .accept_submit_async_read:
-    ; 'C'
+    ; Socket is non-blocking and data isn't here yet.
     ; Submit an async io_uring READ and let the event loop handle it.
     mov r8d, [cur_slot]
     call uring_submit_read_sqe
@@ -6017,10 +6407,10 @@ handle_send_complete:
 do_sendfile:
     ; sendfile(out_fd, in_fd, &offset, count)
     mov rax, 40                   ; sys_sendfile (syscall 40)
-    mov rdi, r13                  ; out_fd (socket)
+    mov rdi, r13                  ; out_fd(socket)
     mov rsi, [slot_file_fd + r8*8] ; in_fd (file descriptor)
     lea rdx, [slot_file_offset + r8*8] ; pointer to offset
-    mov r10, [slot_file_remaining + r8*8] ; Socket is non-blocking and data isn't here yet.
+    mov r10, [slot_file_remaining + r8*8] ; count (total remaining)
     syscall
     
     cmp rax, 0
@@ -6040,7 +6430,7 @@ do_sendfile:
     mov [slot_file_remaining + r8*8], r12
     
     cmp r12, 0
-    jg do_sendfile               ; Since Non-Blocking, we can loop safely until EAGAIN! seq+1
+    jg do_sendfile               ; Since Non-Blocking, we can loop safely until EAGAIN!
     
 send_done_keepalive:
     ; Send succeeded completely → submit READ for next keep-alive request
@@ -6080,7 +6470,7 @@ handle_keepalive_read:
     jmp close_conn
     
 .retry_read:
-    ; SYN?
+    ; Data not ready yet. Resubmit READ SQE
     mov r8d, ecx
     call uring_submit_read_sqe
     mov r8d, [cqe_saved_head]
@@ -6088,21 +6478,24 @@ handle_keepalive_read:
     jmp uring_cqe_continue
 
 .read_ok:
-    ; Point parsing to the slot's buffer
+    ; Point analysis to the slot's buffer
     mov ecx, [cur_slot]
-    shl ecx, 12                   ; slot * 4096
+    shl ecx, 12                   ; slot*4096
     mov rsi, [conn_pool]
     add rsi, rcx                  ; rsi = slot buffer
 
     movsxd rax, dword [r10 + 8]   ; re-read res (bytes)
     mov r9, rax
     add r9, rsi                   ; r9 = end of data
-    mov [pipeline_end_buf], r9
+    push rax
+    mov eax, dword [cur_slot]
+    mov [slot_pipeline_end_buf + rax*8], r9
+    pop rax
 
     jmp read_request_parse_buffer_loop
 
 accept_err:
-    ; * 4096
+    ; Multishot ACCEPT error. Check if fatal or transient.
     ; -EAGAIN(-11), -ECONNABORTED(-103), -EMFILE(-24): transient → multishot stays active, just skip
     ; -ECANCELED(-125), -EINVAL(-22): fatal → re-arm
     cmp eax, -125              ; -ECANCELED
@@ -6120,14 +6513,16 @@ accept_err:
 
 ; === SIGTERM graceful shutdown handler ===
 sigterm_handler:
-    mov byte [shutdown_flag], 1
+    mov al, 1
+    xchg byte [shutdown_flag], al   ; Atomic write (signal-safe, no torn reads)
     mov rax, 231            ; sys_exit_group safely immediately ends the program
     mov rdi, 0
     syscall
 
 ; === SIGHUP cache reload handler ===
 sighup_handler:
-    mov byte [reload_flag], 1
+    mov al, 1
+    xchg byte [reload_flag], al     ; Atomic write (signal-safe, no torn reads)
     ret
 
 ; === Reload cache (called from worker loop) ===
@@ -6156,7 +6551,7 @@ reload_cache:
     ; Duplicates "/" entry for index.html
     mov qword [buffer], 0
     mov byte [buffer], '/'
-    mov dword [buffer+1], 0x65646E69     ; "india"
+    mov dword [buffer+1], 0x65646E69     ; "India"
     mov dword [buffer+5], 0x74682E78     ; "x.ht"
     mov word [buffer+9], 0x6C6D          ; "ml"
     mov byte [buffer+11], ' '
@@ -6237,7 +6632,7 @@ scan_and_cache_directory:
     test ebx, ebx
     jz .scan_done
     
-    xor r12d, r12d      ; pointer to integer 1
+    xor r12d, r12d      ; i = 0
 .vhost_loop:
     cmp r12d, ebx
     jge .scan_done
@@ -6329,7 +6724,7 @@ scan_and_cache_directory:
     
     lea rdi, [cache_scan_buf + 2048]
     mov rsi, r12        ; vhost_id
-    mov rdx, [rsp + 64] ; SPLICE_OUT completed. The proxy socket was perfectly chunked via MSG_PEEK calculation!
+    mov rdx, [rsp + 64] ; doc_root length is at saved rcx (8 pushes * 8 = 64 bytes offset)
     call cache_one_file
     
     pop r15
@@ -6372,9 +6767,9 @@ scan_and_cache_directory:
 ; =====================================================================
 
 xdp_event_loop:
-    ; Legacy: blocking read for more data
-    ; Bitshift to target the right Core
-    ; src IP = original dst
+    ; Poll the RX ring for incoming packets
+    ; RX ring structure: producer(4B), pad(4B), consumer(4B), pad(4B), flags(4B), pad(12B), desc[]
+    ; Each descriptor: addr(u64) + len(u32) + options(u32) = 16 bytes
     mov rcx, [xdp_rx_ring]
     mov eax, [rcx]              ; producer index
     mov ebx, [xdp_rx_cons]      ; our consumer index
@@ -6429,7 +6824,7 @@ xdp_event_loop:
     movzx edi, byte [r11 + 13]  ; TCP flags
 
     ; --- Handle SYN (flags & 0x02, but NOT ACK) ---
-    test edi, 0x02              ; remaining bytes
+    test edi, 0x02              ; SYN?
     jz .xdp_check_fin
     test edi, 0x10              ; already ACK? (SYN-ACK from us)
     jnz .xdp_check_data
@@ -6449,12 +6844,12 @@ xdp_event_loop:
     mov byte [r15], 0x45        ; version=4, IHL=5
     mov byte [r15 + 1], 0      ; DSCP/ECN
     mov word [r15 + 2], 0       ; total length (filled later)
-    mov word [r15 + 4], 0       ; count (total remaining)
+    mov word [r15 + 4], 0       ; identification
     mov word [r15 + 6], 0x0040  ; flags: Don't Fragment
     mov byte [r15 + 8], 64      ; TTL
     mov byte [r15 + 9], 6       ; protocol: TCP
     mov word [r15 + 10], 0      ; checksum (computed later)
-    mov [r15 + 12], ebx         ; r8d = packet length, xdp_pkt_buf has the packet
+    mov [r15 + 12], ebx         ; src IP = original dst
     mov [r15 + 16], eax         ; dst IP = original src
 
     ; TCP header (20 bytes + MSS option = 24 bytes)
@@ -6552,14 +6947,14 @@ xdp_event_loop:
     movzx edx, byte [r11 + 12] ; TCP data offset
     shr edx, 4
     shl edx, 2
-    sub ecx, edx                ; r8d = slot_idx
+    sub ecx, edx                ; payload length
     add eax, ecx
     inc eax                     ; +1 for END
     mov [xdp_tcp_ack], eax
     bswap eax
     mov [r14 + 8], eax
 
-    mov byte [r14 + 12], 0x50  ; { addr, len, chunk_size, headroom, flags }
+    mov byte [r14 + 12], 0x50  ; data offset = 5 (20 bytes)
     mov byte [r14 + 13], 0x11  ; flags: END + ACK
     mov word [r14 + 14], 0xFFFF
     mov word [r14 + 16], 0
@@ -6596,8 +6991,8 @@ xdp_event_loop:
     ; Payload length = IP total length - IP header - TCP header
     movzx eax, word [r9 + 2]    ; IP total length (big-endian)
     xchg al, ah
-    sub eax, r10d                ; - IP header
-    sub eax, r13d                ; - TCP header
+    sub eax, r10d                ; -IP header
+    sub eax, r13d                ; -TCP header
 
     cmp eax, 0
     jle .xdp_send_ack_only       ; Pure ACK (no data), just acknowledge
@@ -6615,7 +7010,7 @@ xdp_event_loop:
     movzx ecx, word [r9 + 2]
     xchg cl, ch
     sub ecx, r10d
-    sub ecx, r13d               ; r8d = slot_idx
+    sub ecx, r13d               ; payload length
     add eax, ecx
     mov [xdp_tcp_ack], eax
 
@@ -6665,9 +7060,9 @@ xdp_event_loop:
     mov [r14 + 8], eax
 
     mov byte [r14 + 12], 0x50  ; data offset = 5
-    mov byte [r14 + 13], 0x18  ; PSH + ACK
+    mov byte [r14 + 13], 0x18  ; PSH+ACK
     mov word [r14 + 14], 0xFFFF ; window
-    mov word [r14 + 16], 0      ; Exact topological match!
+    mov word [r14 + 16], 0      ; checksum (later)
     mov word [r14 + 18], 0
 
     ; Copy HTTP response body (msg_auth_ok) into the packet after TCP header
@@ -6778,7 +7173,7 @@ xdp_event_loop:
 
 .xdp_send_packet:
     ; Submit the response on the TX ring
-    ; data offset = 5 (20 bytes)
+    ; r8d = packet length, xdp_pkt_buf has the packet
 
     ; First, copy packet into a UMEM frame for TX
     ; Use frame 511 (last frame) as TX buffer
@@ -6825,7 +7220,7 @@ xdp_event_loop:
     mov edi, [xsk_fd]
     mov [rsp], edi              ; fd
     mov word [rsp + 4], 1       ; events = POLLIN
-    mov word [rsp + 6], 0       ; revents
+    mov word [rsp + 6], 0       ; rewinds
     mov rax, 7                  ; sys_poll
     lea rdi, [rsp]
     mov rsi, 1                  ; nfds = 1

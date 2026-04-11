@@ -1,7 +1,7 @@
 CC = gcc
 NASM = nasm
-CFLAGS = -O2 -Wall
-LDFLAGS = -nostartfiles -no-pie
+CFLAGS = -O2 -Wall -Wextra -Wformat -Wformat-security -fstack-protector-strong -fstack-clash-protection -D_FORTIFY_SOURCE=2 -fPIC
+LDFLAGS = -nostartfiles -no-pie -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
 LIBS = -lssl -lcrypto
 NASMFLAGS = -f elf64
 
@@ -35,5 +35,5 @@ clean:
 
 setcap: $(BIN)
 	@echo "🗝️ Injection des capacités Kernel (Zero-Copy / io_uring)..."
-	sudo setcap cap_ipc_lock,cap_net_admin,cap_net_raw,cap_sys_admin+ep ./$(BIN)
+	sudo setcap cap_net_bind_service,cap_net_raw,cap_ipc_lock+ep ./$(BIN)
 	@echo "✅ Capacités injectées !"
