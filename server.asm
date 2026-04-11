@@ -2897,35 +2897,16 @@ normal_routing:
     ; ==========================================
     mov r8d, [cur_slot]
 
-    ; Verify if SPLICE ZC is supported (TCP=1) or unsupported (UNIX=0)
-    mov eax, [slot_proxy_loc_idx + r8*4]
-    mov edx, eax
-    shr eax, 4              ; vhost
-    and edx, 15             ; loc
-    
-    imul rax, 2048
-    lea r12, [vhosts + rax]
-    
-    mov eax, 144
-    mul edx
-    lea r11, [r12 + 320 + rax]
-    movzx r13d, word [r11 + 142] ; splice_mode
-    
-    cmp r13d, 1
+    cmp byte [slot_proxy_state + r8], 1
     je .proxy_do_write_splice
     
     ; --- FULLY ASYNC KERNEL QUEUE ---
     mov rsi, [slot_proxy_req_ptr + r8*8]
     mov edx, [slot_proxy_req_len + r8*4]
-    mov rax, 1
-    mov rdi, r14
-    syscall
-    cmp rax, 0
-    jl .proxy_sync_fail
-
-    mov r8d, [cur_slot]
-    mov r14d, [slot_proxy_fds + r8*4]
-    call uring_submit_proxy_read_sqe
+    
+    call uring_submit_proxy_send_sqe
+    mov r8d, [cqe_saved_head]
+    mov r15d, [cqe_saved_tail]
     jmp uring_cqe_continue
 
 .proxy_do_write_splice:
