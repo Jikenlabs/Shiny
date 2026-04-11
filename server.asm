@@ -2942,10 +2942,7 @@ normal_routing:
 
 .proxy_pipe_ready:
     mov r8d, [cur_slot]
-    mov eax, r8d
-    shl eax, 12
-    add rax, [conn_pool]
-    mov rsi, rax
+    mov rsi, [slot_proxy_req_ptr + r8*8]
     mov edx, [slot_proxy_req_len + r8*4]
     call uring_submit_proxy_send_sqe
     jmp uring_cqe_continue

@@ -18,6 +18,8 @@ class DummyTCPHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # Enable keep-alive by default
 
     def do_GET(self):
+
+
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.send_header('X-Proxy-Target', 'TCP')
@@ -34,6 +36,8 @@ class DummyUnixHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # Enable keep-alive by default
 
     def do_GET(self):
+
+
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.send_header('X-Proxy-Target', 'UNIX')
@@ -104,7 +108,7 @@ def setup_backends_and_shiny():
     except ConnectionRefusedError:
         # Shiny isn't running, start it
         print("Starting ./Shiny (assumes it's compiled)...")
-        proc = subprocess.Popen(['./Shiny'])
+        proc = subprocess.Popen(['./Shiny', 'tests/shiny_test.conf'])
         time.sleep(3) # wait for multi-process startup and port binding
 
     
