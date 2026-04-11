@@ -2900,21 +2900,13 @@ normal_routing:
     cmp byte [slot_proxy_state + r8], 1
     je .proxy_do_write_splice
     
-    ; --- FALLBACK: SYNC WRITE + ASYNC RECV ---
-    mov eax, r8d
-    shl eax, 12
-    add rax, [conn_pool]
-    mov rsi, rax
+    ; --- FULLY ASYNC KERNEL QUEUE ---
+    mov rsi, [slot_proxy_req_ptr + r8*8]
     mov edx, [slot_proxy_req_len + r8*4]
-    mov rax, 1             ; sys_write
-    mov rdi, r14           ; proxy_fd
-    syscall
-    cmp rax, 0
-    jle .proxy_sync_fail
-
-    mov r8d, [cur_slot]
-    mov r14d, [slot_proxy_fds + r8*4]
-    call uring_submit_proxy_read_sqe
+    
+    call uring_submit_proxy_send_sqe
+    mov r8d, [cqe_saved_head]
+    mov r15d, [cqe_saved_tail]
     jmp uring_cqe_continue
 
 .proxy_do_write_splice:
