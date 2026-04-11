@@ -540,7 +540,7 @@ void parse_nginx_config(const char *filepath) {
                         // Find matching upstream globally
                         int matched_upstream = -1;
                         for (int uid = 0; uid < upstreams_count; uid++) {
-                            if (strlen(upstreams_list[uid].name) == name_len && strncmp(upstreams_list[uid].name, unix_ptr, name_len) == 0) {
+                            if ((int)strlen(upstreams_list[uid].name) == name_len && strncmp(upstreams_list[uid].name, unix_ptr, name_len) == 0) {
                                 matched_upstream = uid;
                                 break;
                             }

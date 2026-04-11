@@ -55,6 +55,7 @@ static void cleanup_state(int epfd, struct tls_state *st) {
 }
 
 static void *tls_manager_loop(void *arg) {
+    (void)arg;
     int epfd = epoll_create1(0);
     struct epoll_event ev, events[256];
 
@@ -67,6 +68,7 @@ static void *tls_manager_loop(void *arg) {
     while (1) {
         int n = epoll_wait(epfd, events, 256, -1);
         for (int i = 0; i < n; i++) {
+            struct tls_state *st = NULL;
             // 1. New Request from Assembly loop
             if (events[i].data.ptr == (void*)1) {
                 struct { int fd; int port; } req;
@@ -80,7 +82,7 @@ static void *tls_manager_loop(void *arg) {
                     }
                     SSL_set_fd(ssl, req.fd);
 
-                    struct tls_state *st = calloc(1, sizeof(struct tls_state));
+                    st = calloc(1, sizeof(struct tls_state));
                     st->fd = req.fd; st->asm_fd = -1; st->port = req.port; st->ssl = ssl;
                     struct epoll_event cev = { .events = EPOLLIN | EPOLLOUT | EPOLLET, .data.ptr = st };
                     epoll_ctl(epfd, EPOLL_CTL_ADD, st->fd, &cev);
@@ -92,7 +94,7 @@ static void *tls_manager_loop(void *arg) {
 
             // 2. Identification du contexte et du canal
             uintptr_t ptr_raw = (uintptr_t)events[i].data.ptr;
-            struct tls_state *st = (struct tls_state *)(ptr_raw & ~1UL);
+            st = (struct tls_state *)(ptr_raw & ~1UL);
             int is_asm_event = (ptr_raw & 1);
             if (!st) continue;
 
@@ -137,7 +139,7 @@ handshake_done_final: {
                     int pre_len = SSL_read(st->ssl, pre_buf, sizeof(pre_buf));
                     if (pre_len < 0) pre_len = 0;
                     SSL_set_fd(st->ssl, -1);
-                    struct { int fd, port, data_len; char data[4096]; } msg = { st->fd, st->port, pre_len };
+                    struct { int fd, port, data_len; char data[4096]; } msg = { st->fd, st->port, pre_len, {0} };
                     if (pre_len > 0) memcpy(msg.data, pre_buf, pre_len);
                     if (write(tls_res_fd[1], &msg, 12 + pre_len) < 0) { /* Silence warning */ ; }
                     st->fd = -1; cleanup_state(epfd, st);

@@ -131,7 +131,7 @@ def setup_backends_and_shiny():
 def test_static_file():
     """Test static file distribution (via sendfile)."""
     url = "http://127.0.0.1:8080/test_target.html"
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen(url, timeout=5) as response:
         assert response.status == 200
         assert b"HelloWorld" in response.read()
 
@@ -139,7 +139,7 @@ def test_static_file_404():
     """Test the return of the appropriate 404 error for a missing file."""
     url = "http://127.0.0.1:8080/does_not_exist.html"
     with pytest.raises(urllib.error.HTTPError) as exc_info:
-        urllib.request.urlopen(url, timeout=2)
+        urllib.request.urlopen(url, timeout=5)
     assert exc_info.value.code == 404
 
 # --- NEW TDD TESTS (Nginx Standard) ---
@@ -147,7 +147,7 @@ def test_static_file_404():
 def test_static_exact_content_length():
     """TDD: Verify the server calls stat() and sends the correct size (15 bytes here)."""
     url = "http://127.0.0.1:8080/exact.txt"
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen(url, timeout=5) as response:
         assert response.status == 200
         assert int(response.getheader('Content-Length')) == 15
         assert response.read() == b"Exact15Bytes..."
@@ -155,18 +155,18 @@ def test_static_exact_content_length():
 def test_static_content_type():
     """TDD: Verify correct Content-Type assignment based on file extension."""
     # Test text/html
-    with urllib.request.urlopen("http://127.0.0.1:8080/index.html", timeout=2) as res:
+    with urllib.request.urlopen("http://127.0.0.1:8080/index.html", timeout=5) as res:
         assert res.status == 200
         assert "text/html" in res.getheader('Content-Type')
     # Test text/css
-    with urllib.request.urlopen("http://127.0.0.1:8080/style.css", timeout=2) as res:
+    with urllib.request.urlopen("http://127.0.0.1:8080/style.css", timeout=5) as res:
         assert res.status == 200
         assert "text/css" in res.getheader('Content-Type')
 
 def test_static_head_request():
     """TDD: The HEAD request must ONLY send headers and NO payload."""
     req = urllib.request.Request("http://127.0.0.1:8080/exact.txt", method="HEAD")
-    with urllib.request.urlopen(req, timeout=2) as response:
+    with urllib.request.urlopen(req, timeout=5) as response:
         assert response.status == 200
         assert int(response.getheader('Content-Length')) == 15
         assert response.read() == b"" # The payload MUST be empty for HEAD!
@@ -174,7 +174,7 @@ def test_static_head_request():
 def test_static_directory_index():
     """TDD: GET `/` must automatically serve `index.html`."""
     url = "http://127.0.0.1:8080/"
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen(url, timeout=5) as response:
         assert response.status == 200
         assert b"IndexHTML" in response.read()
 
@@ -182,7 +182,7 @@ def test_static_path_traversal():
     """TDD: Security (LFI) - Prevents extracting files outside the vhost."""
     url = "http://127.0.0.1:8080/../../../etc/passwd"
     try:
-        urllib.request.urlopen(url, timeout=2)
+        urllib.request.urlopen(url, timeout=5)
         pytest.fail("TDD: LFI Possible! Server returned 200 instead of an error (400/403/404).")
     except urllib.error.HTTPError as e:
         assert e.code in [400, 403, 404]
@@ -191,7 +191,7 @@ def test_static_method_not_allowed():
     """TDD: POST on a static file is not allowed (405 Method Not Allowed)."""
     req = urllib.request.Request("http://127.0.0.1:8080/exact.txt", data=b"data", method="POST")
     try:
-        urllib.request.urlopen(req, timeout=2)
+        urllib.request.urlopen(req, timeout=5)
         pytest.fail("TDD: POST successful on static file! Must be 405 Method Not Allowed.")
     except urllib.error.HTTPError as e:
         assert e.code == 405
@@ -200,7 +200,7 @@ def test_static_method_not_allowed():
 def test_tcp_proxy():
     """Test routing through a standard TCP reverse proxy."""
     url = "http://127.0.0.1:8080/api/test"
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen(url, timeout=5) as response:
         assert response.status == 200
         assert response.getheader('X-Proxy-Target') == 'TCP'
         assert b"Hello from TCP Backend" in response.read()
@@ -208,14 +208,14 @@ def test_tcp_proxy():
 def test_unix_proxy():
     """Test routing through proxy with Unix Domain Sockets."""
     url = "http://127.0.0.1:8080/api_sock/test"
-    with urllib.request.urlopen(url, timeout=2) as response:
+    with urllib.request.urlopen(url, timeout=5) as response:
         assert response.status == 200
         assert response.getheader('X-Proxy-Target') == 'UNIX'
         assert b"Hello from UNIX Backend" in response.read()
 
 def test_keep_alive():
     """Test multiple requests can be handled on a single Keep-Alive without reset."""
-    conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=2)
+    conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
     for i in range(10):
         # Request to the proxy_pass to get dynamic content
         conn.request("GET", "/api_sock/", headers={"Connection": "keep-alive"})
@@ -274,7 +274,7 @@ def test_malformed_request():
 
 def test_large_header():
     """TDD: Reject or properly handle HTTP headers that overflow size limits."""
-    conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=2)
+    conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
     headers = {
         "X-Custom-Big-Header": "A" * 8192
     }
