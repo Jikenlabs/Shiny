@@ -222,12 +222,12 @@ def test_keep_alive():
     conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
     for i in range(10):
         # Request to the proxy_pass to get dynamic content
-        conn.request("GET", "/api/", headers={"Connection": "keep-alive"})
+        conn.request("GET", "/api_sock/", headers={"Connection": "keep-alive"})
         res = conn.getresponse()
         assert res.status == 200, f"Failed at iteration i={i} with status {res.status}"
         data = res.read()
-        assert b"TCP Backend" in data
-        assert res.getheader('X-Proxy-Target') == 'TCP'
+        assert b"UNIX Backend" in data
+        assert res.getheader('X-Proxy-Target') == 'UNIX'
     conn.close()
 
 def test_http_pipelining():
