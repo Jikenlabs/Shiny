@@ -93,9 +93,12 @@ def setup_backends_and_shiny():
         f.write("IndexHTML") # Auto-indexed file
 
     proc = None
-    # 4. Check if shiny is already running, if not start it
+    # 4. Kill any running 'Shiny' or 'server' processes to ensure a clean testing state
+    subprocess.run(["killall", "-9", "Shiny", "server"], stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+
     try:
-        # Small request to check if port 8080 responds
+        # Small request to check if port 8080 still responds
         with socket.create_connection(("127.0.0.1", 8080), timeout=1) as sock:
             pass
     except ConnectionRefusedError:
